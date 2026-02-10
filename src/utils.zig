@@ -2,9 +2,9 @@ const std = @import("std");
 const linux = std.os.linux;
 
 pub const CGROUP_PATH = "/sys/fs/cgroup/";
-pub const INFO_PATH = "/var/run/zcrun/containers/";
+pub const INFO_PATH = "/var/run/zspace/containers/";
 pub const NETNS_PATH = INFO_PATH ++ "netns/";
-pub const BRIDGE_NAME = "zcrun0";
+pub const BRIDGE_NAME = "zspace0";
 
 pub fn checkErr(val: usize, err: anyerror) !void {
     const e = std.posix.errno(val);

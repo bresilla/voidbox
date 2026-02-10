@@ -24,6 +24,8 @@ const AddressHeader = packed struct {
 pub const AddressInfo = struct {
     hdr: AddressHeader,
     attrs: std.ArrayList(AddressAttr),
+    allocator: std.mem.Allocator,
+
     pub fn init(allocator: std.mem.Allocator) AddressInfo {
         return .{
             .hdr = .{
@@ -33,7 +35,8 @@ pub const AddressInfo = struct {
                 .scope = .Universe,
                 .index = 0,
             },
-            .attrs = std.ArrayList(AddressAttr).init(allocator),
+            .attrs = .empty,
+            .allocator = allocator,
         };
     }
 
@@ -117,5 +120,5 @@ pub fn compose(self: *Addr) ![]u8 {
 }
 
 pub fn addAttr(self: *Addr, attr: AddressAttr) !void {
-    try self.msg.attrs.append(attr);
+    try self.msg.attrs.append(self.msg.allocator, attr);
 }

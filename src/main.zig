@@ -13,17 +13,18 @@ pub fn main() !void {
 
     switch (cmd) {
         .run => |r| {
-            try zcrunInit();
+            try zspaceInit();
             var container = try Container.init(r, allocator);
             defer container.deinit();
             try container.run();
         },
         .help => {
-            _ = try std.io.getStdOut().write(args.help);
+            const stdout = std.fs.File.stdout().deprecatedWriter();
+            _ = try stdout.write(args.help);
         },
         .ps => {
             const containers = try ps.runningContainers(allocator);
-            var stdout = std.io.getStdOut().writer();
+            var stdout = std.fs.File.stdout().deprecatedWriter();
             _ = try stdout.print("Running Containers:\n", .{});
             for (containers) |c| {
                 try c.print(stdout);
@@ -32,11 +33,11 @@ pub fn main() !void {
     }
 }
 
-pub fn zcrunInit() !void {
-    _ = try utils.createDirIfNotExists("/var/run/zcrun");
-    _ = try utils.createDirIfNotExists("/var/run/zcrun/containers");
-    _ = try utils.createDirIfNotExists("/var/run/zcrun/containers/netns");
-    const path = utils.CGROUP_PATH ++ "zcrun/";
+pub fn zspaceInit() !void {
+    _ = try utils.createDirIfNotExists("/var/run/zspace");
+    _ = try utils.createDirIfNotExists("/var/run/zspace/containers");
+    _ = try utils.createDirIfNotExists("/var/run/zspace/containers/netns");
+    const path = utils.CGROUP_PATH ++ "zspace/";
     if (!try utils.createDirIfNotExists(path)) return;
 
     // setup root cgroup

@@ -94,11 +94,13 @@ pub const RouteHeader = extern struct {
 pub const RouteInfo = struct {
     hdr: RouteHeader,
     attrs: std.ArrayList(Attr),
+    allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) RouteInfo {
         return .{
             .hdr = .{},
-            .attrs = std.ArrayList(Attr).init(allocator),
+            .attrs = .empty,
+            .allocator = allocator,
         };
     }
 
@@ -119,7 +121,7 @@ pub const RouteInfo = struct {
         }
     }
     pub fn deinit(self: *RouteInfo) void {
-        self.attrs.deinit();
+        self.attrs.deinit(self.allocator);
     }
 };
 
@@ -183,7 +185,7 @@ pub fn compose(self: *Route) ![]u8 {
 }
 
 pub fn addAttr(self: *Route, attr: Attr) !void {
-    try self.msg.attrs.append(attr);
+    try self.msg.attrs.append(self.allocator, attr);
 }
 
 pub fn deinit(self: *Route) void {

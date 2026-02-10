@@ -71,7 +71,7 @@ fn recv(self: *LinkGet) !LinkMessage {
     log.info("ifinfo: {}", .{ifinfo});
     while (start < n) {
         const rtattr = std.mem.bytesAsValue(linux.rtattr, buff[start .. start + @sizeOf(linux.rtattr)]);
-        switch (rtattr.type) {
+        switch (rtattr.type.link) {
             .IFNAME => {
                 const value = buff[start + @sizeOf(linux.rtattr) .. start + rtattr.len - 1]; // skip null terminating byte
                 const ifname = try self.allocator.alloc(u8, value.len);

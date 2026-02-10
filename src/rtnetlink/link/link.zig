@@ -55,6 +55,7 @@ const RequestType = enum {
 pub const LinkInfo = struct {
     header: linux.ifinfomsg,
     attrs: std.ArrayList(LinkAttribute),
+    allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) LinkInfo {
         return .{
@@ -66,7 +67,8 @@ pub const LinkInfo = struct {
                 .change = 0,
             },
 
-            .attrs = std.ArrayList(LinkAttribute).init(allocator),
+            .attrs = .empty,
+            .allocator = allocator,
         };
     }
 
@@ -95,7 +97,7 @@ pub const LinkInfo = struct {
                 else => {},
             }
         }
-        self.attrs.deinit();
+        self.attrs.deinit(self.allocator);
     }
 };
 
@@ -134,7 +136,7 @@ pub fn compose(self: *Link) ![]u8 {
 }
 
 pub fn addAttr(self: *Link, attr: LinkAttribute) !void {
-    try self.msg.attrs.append(attr);
+    try self.msg.attrs.append(self.allocator, attr);
 }
 
 pub fn deinit(self: *Link) void {

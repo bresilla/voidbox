@@ -23,10 +23,10 @@ pub const LinkAttribute = union(enum) {
 
     fn getAttr(self: LinkAttribute) linux.rtattr {
         var attr: linux.rtattr = switch (self) {
-            .name => |val| .{ .len = @intCast(val.len + 1), .type = .IFNAME },
-            .link_info => |val| .{ .len = @intCast(val.size()), .type = .LINKINFO },
-            .master => .{ .len = 4, .type = .MASTER },
-            .netns_fd => .{ .len = 4, .type = .NET_NS_FD },
+            .name => |val| .{ .len = @intCast(val.len + 1), .type = .{ .link = .IFNAME } },
+            .link_info => |val| .{ .len = @intCast(val.size()), .type = .{ .link = .LINKINFO } },
+            .master => .{ .len = 4, .type = .{ .link = .MASTER } },
+            .netns_fd => .{ .len = 4, .type = .{ .link = .NET_NS_FD } },
         };
 
         attr.len = @intCast(std.mem.alignForward(usize, attr.len + @sizeOf(linux.rtattr), 4));

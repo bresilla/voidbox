@@ -4,7 +4,7 @@ inline fn eql(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }
 
-/// zcrun run <name> <rootfs_path> <cmd>
+/// zspace run <name> <rootfs_path> <cmd>
 pub const RunArgs = struct {
     name: []const u8,
     rootfs_path: []const u8,
@@ -19,14 +19,14 @@ pub const RunArgs = struct {
             .cmd = undefined,
         };
 
-        var cmd = std.ArrayList([]const u8).init(allocator);
+        var cmd = std.ArrayList([]const u8).empty;
 
         while (args.next()) |val| {
-            try cmd.append(val);
+            try cmd.append(allocator, val);
         }
         if (cmd.items.len == 0) return error.MissingCmd;
 
-        run_args.cmd = try cmd.toOwnedSlice();
+        run_args.cmd = try cmd.toOwnedSlice(allocator);
         return run_args;
     }
 };
@@ -64,7 +64,7 @@ pub const Args = union(enum) {
 };
 
 pub const help =
-    \\zcrun: linux container runtime
+    \\zspace: linux container runtime
     \\
     \\arguments:
     \\run [-mem] [-cpu] [-pids] <name> <rootfs_path> <cmd> 

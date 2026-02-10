@@ -21,7 +21,7 @@ const Kind = enum {
 
     fn encode(self: Kind, buff: []u8) !usize {
         const attr_size = @sizeOf(linux.rtattr);
-        const hdr = linux.rtattr{ .len = @intCast(self.size()), .type = LinkInfoKind };
+        const hdr = linux.rtattr{ .len = @intCast(self.size()), .type = .{ .link = LinkInfoKind } };
         @memcpy(buff[0..attr_size], std.mem.asBytes(&hdr));
 
         const value = @tagName(self);
@@ -39,7 +39,7 @@ const Info = union(enum) {
     }
 
     fn encode(self: Info, buff: []u8) !usize {
-        const header = linux.rtattr{ .len = @intCast(self.size()), .type = self.info_type() };
+        const header = linux.rtattr{ .len = @intCast(self.size()), .type = .{ .link = self.info_type() } };
         @memcpy(buff[0..@sizeOf(linux.rtattr)], std.mem.asBytes(&header));
         switch (self) {
             inline else => |v| {
@@ -76,7 +76,7 @@ pub const LinkInfoAttr = struct {
         start += try self.kind.encode(buff[0..]);
 
         // link info data
-        const hdr3 = linux.rtattr{ .len = @intCast(len - start), .type = LinkInfoData };
+        const hdr3 = linux.rtattr{ .len = @intCast(len - start), .type = .{ .link = LinkInfoData } };
         @memcpy(buff[start .. start + @sizeOf(linux.rtattr)], std.mem.asBytes(&hdr3));
         start += @sizeOf(linux.rtattr);
 

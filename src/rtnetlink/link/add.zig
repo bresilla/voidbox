@@ -28,7 +28,7 @@ fn veth(self: *LinkAdd, if_name: []const u8, peer_name: []const u8) !void {
     try self.name(if_name);
 
     var peer_info = LinkMessage.LinkInfo.init(self.msg.allocator);
-    try peer_info.attrs.append(.{ .name = peer_name });
+    try peer_info.attrs.append(self.msg.allocator, .{ .name = peer_name });
 
     try self.msg.addAttr(.{
         .link_info = .{ .info = .{ .peer_info = peer_info }, .kind = .veth },

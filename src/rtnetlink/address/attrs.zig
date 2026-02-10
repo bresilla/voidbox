@@ -3,14 +3,14 @@ const nalign = @import("../utils.zig").nalign;
 const linux = std.os.linux;
 const c = @cImport(@cInclude("linux/rtnetlink.h"));
 
-const IFA_ADDRESS: linux.IFLA = @enumFromInt(1);
-const IFA_LOCAL: linux.IFLA = @enumFromInt(2);
-const IFA_LABEL: linux.IFLA = @enumFromInt(3);
-const IFA_BROADCAST: linux.IFLA = @enumFromInt(4);
-const IFA_ANYCAST: linux.IFLA = @enumFromInt(5);
-const IFA_CACHEINFO: linux.IFLA = @enumFromInt(6);
-const IFA_MULTICAST: linux.IFLA = @enumFromInt(7);
-const IFA_FLAGS: linux.IFLA = @enumFromInt(8);
+const IFA_ADDRESS: linux.IFA = @enumFromInt(1);
+const IFA_LOCAL: linux.IFA = @enumFromInt(2);
+const IFA_LABEL: linux.IFA = @enumFromInt(3);
+const IFA_BROADCAST: linux.IFA = @enumFromInt(4);
+const IFA_ANYCAST: linux.IFA = @enumFromInt(5);
+const IFA_CACHEINFO: linux.IFA = @enumFromInt(6);
+const IFA_MULTICAST: linux.IFA = @enumFromInt(7);
+const IFA_FLAGS: linux.IFA = @enumFromInt(8);
 
 // TODO: support IPv6
 pub const AddressAttr = union(enum) {
@@ -20,9 +20,9 @@ pub const AddressAttr = union(enum) {
 
     fn getAttr(self: AddressAttr) linux.rtattr {
         var attr: linux.rtattr = switch (self) {
-            .address => |val| .{ .len = @intCast(val.len), .type = IFA_ADDRESS },
-            .local => |val| .{ .len = @intCast(val.len), .type = IFA_LOCAL },
-            .broadcast => |val| .{ .len = @intCast(val.len), .type = IFA_BROADCAST },
+            .address => |val| .{ .len = @intCast(val.len), .type = .{ .addr = IFA_ADDRESS } },
+            .local => |val| .{ .len = @intCast(val.len), .type = .{ .addr = IFA_LOCAL } },
+            .broadcast => |val| .{ .len = @intCast(val.len), .type = .{ .addr = IFA_BROADCAST } },
         };
 
         attr.len = @intCast(nalign(attr.len + @sizeOf(linux.rtattr)));

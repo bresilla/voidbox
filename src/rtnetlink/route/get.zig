@@ -41,18 +41,18 @@ fn recv(self: *Get) ![]RouteMessage {
 
     var n = try self.nl.recv(&buff);
 
-    var response = std.ArrayList(RouteMessage).init(self.allocator);
-    errdefer response.deinit();
+    var response = std.ArrayList(RouteMessage).empty;
+    errdefer response.deinit(self.allocator);
     outer: while (n != 0) {
         var d: usize = 0;
         while (d < n) {
             const msg = (try self.parseMessage(buff[d..])) orelse break :outer;
-            try response.append(msg);
+            try response.append(self.allocator, msg);
             d += msg.hdr.len;
         }
         n = try self.nl.recv(&buff);
     }
-    return response.toOwnedSlice();
+    return response.toOwnedSlice(self.allocator);
 }
 
 fn parseMessage(self: *Get, buff: []u8) !?RouteMessage {

@@ -92,11 +92,71 @@ pub fn validate(jail_config: JailConfig) !void {
     if (jail_config.rootfs_path.len == 0) return error.InvalidRootfsPath;
     if (jail_config.cmd.len == 0) return error.MissingCommand;
     if (jail_config.cmd[0].len == 0) return error.InvalidCommand;
+    if (jail_config.resources.mem) |v| if (v.len == 0) return error.InvalidMemoryLimit;
+    if (jail_config.resources.cpu) |v| if (v.len == 0) return error.InvalidCpuLimit;
+    if (jail_config.resources.pids) |v| if (v.len == 0) return error.InvalidPidsLimit;
     if (jail_config.process.argv0) |argv0| {
         if (argv0.len == 0) return error.InvalidArgv0;
     }
     if (jail_config.process.chdir) |chdir_path| {
         if (chdir_path.len == 0) return error.InvalidChdir;
+    }
+
+    if (!jail_config.isolation.mount and jail_config.fs_actions.len > 0) {
+        return error.FsActionsRequireMountNamespace;
+    }
+
+    for (jail_config.process.unset_env) |key| {
+        if (key.len == 0) return error.InvalidUnsetEnvKey;
+    }
+    for (jail_config.process.set_env) |entry| {
+        if (entry.key.len == 0) return error.InvalidSetEnvKey;
+    }
+
+    for (jail_config.fs_actions) |action| {
+        try validateFsAction(action);
+    }
+}
+
+fn validateFsAction(action: FsAction) !void {
+    switch (action) {
+        .bind => |pair| {
+            if (pair.src.len == 0) return error.InvalidFsSource;
+            if (pair.dest.len == 0) return error.InvalidFsDestination;
+        },
+        .ro_bind => |pair| {
+            if (pair.src.len == 0) return error.InvalidFsSource;
+            if (pair.dest.len == 0) return error.InvalidFsDestination;
+        },
+        .proc => |dest| {
+            if (dest.len == 0) return error.InvalidFsDestination;
+        },
+        .dev => |dest| {
+            if (dest.len == 0) return error.InvalidFsDestination;
+        },
+        .tmpfs => |tmpfs| {
+            if (tmpfs.dest.len == 0) return error.InvalidFsDestination;
+            if (tmpfs.mode) |mode| {
+                if (mode > 0o7777) return error.InvalidFsMode;
+            }
+        },
+        .dir => |d| {
+            if (d.path.len == 0) return error.InvalidFsDestination;
+            if (d.mode) |mode| {
+                if (mode > 0o7777) return error.InvalidFsMode;
+            }
+        },
+        .symlink => |s| {
+            if (s.path.len == 0) return error.InvalidFsDestination;
+            if (s.target.len == 0) return error.InvalidFsSource;
+        },
+        .chmod => |c| {
+            if (c.path.len == 0) return error.InvalidFsDestination;
+            if (c.mode > 0o7777) return error.InvalidFsMode;
+        },
+        .remount_ro => |dest| {
+            if (dest.len == 0) return error.InvalidFsDestination;
+        },
     }
 }
 
@@ -157,4 +217,27 @@ test "validate rejects empty rootfs" {
     };
 
     try std.testing.expectError(error.InvalidRootfsPath, validate(cfg));
+}
+
+test "validate rejects fs actions when mount isolation disabled" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .isolation = .{ .mount = false },
+        .fs_actions = &.{.{ .proc = "/proc" }},
+    };
+
+    try std.testing.expectError(error.FsActionsRequireMountNamespace, validate(cfg));
+}
+
+test "validate rejects malformed fs action" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .fs_actions = &.{.{ .bind = .{ .src = "", .dest = "/x" } }},
+    };
+
+    try std.testing.expectError(error.InvalidFsSource, validate(cfg));
 }

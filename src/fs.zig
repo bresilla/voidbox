@@ -202,6 +202,15 @@ fn rollbackMounts(mounted_targets: []const MountedTarget) void {
     }
 }
 
+fn rollbackPaths(mounted_targets: []const MountedTarget, allocator: std.mem.Allocator) ![]const []const u8 {
+    var out = try allocator.alloc([]const u8, mounted_targets.len);
+    var i: usize = 0;
+    while (i < mounted_targets.len) : (i += 1) {
+        out[i] = mounted_targets[mounted_targets.len - 1 - i].path;
+    }
+    return out;
+}
+
 fn writeDataSource(data: []const u8, index: usize) ![]const u8 {
     const path = try std.fmt.allocPrint(std.heap.page_allocator, "/tmp/.voidbox-data/{d}", .{index});
     const parent = std.fs.path.dirname(path);
@@ -294,4 +303,26 @@ test "findOverlaySource resolves source by key" {
 
     try std.testing.expectEqualStrings("/layers/dev", findOverlaySource(&sources, "dev").?);
     try std.testing.expect(findOverlaySource(&sources, "none") == null);
+}
+
+test "rollbackPaths returns reverse mount order" {
+    const mounted = [_]MountedTarget{
+        .{ .path = "/proc" },
+        .{ .path = "/tmp" },
+        .{ .path = "/dev" },
+    };
+
+    const ordered = try rollbackPaths(&mounted, std.testing.allocator);
+    defer std.testing.allocator.free(ordered);
+
+    try std.testing.expectEqualStrings("/dev", ordered[0]);
+    try std.testing.expectEqualStrings("/tmp", ordered[1]);
+    try std.testing.expectEqualStrings("/proc", ordered[2]);
+}
+
+test "rollbackPaths handles empty mount list" {
+    const mounted = [_]MountedTarget{};
+    const ordered = try rollbackPaths(&mounted, std.testing.allocator);
+    defer std.testing.allocator.free(ordered);
+    try std.testing.expectEqual(@as(usize, 0), ordered.len);
 }

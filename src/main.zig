@@ -10,7 +10,7 @@ pub fn main() !void {
 
     switch (cmd) {
         .run => |r| {
-            const config: voidbox.JailConfig = .{
+            var config: voidbox.JailConfig = .{
                 .name = r.name,
                 .rootfs_path = r.rootfs_path,
                 .cmd = r.cmd,
@@ -27,6 +27,11 @@ pub fn main() !void {
                     .ipc = r.isolation.ipc,
                 },
             };
+
+            if (r.profile) |profile| {
+                voidbox.with_profile(&config, profile);
+            }
+
             _ = try voidbox.launch(config, allocator);
         },
         .help => {

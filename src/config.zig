@@ -14,6 +14,12 @@ pub const IsolationOptions = struct {
     ipc: bool = true,
 };
 
+pub const LaunchProfile = enum {
+    minimal,
+    default,
+    full_isolation,
+};
+
 pub const EnvironmentEntry = struct {
     key: []const u8,
     value: []const u8,

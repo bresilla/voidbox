@@ -10,6 +10,7 @@ pub const IsolationOptions = config.IsolationOptions;
 pub const ResourceLimits = config.ResourceLimits;
 pub const ProcessOptions = config.ProcessOptions;
 pub const EnvironmentEntry = config.EnvironmentEntry;
+pub const LaunchProfile = config.LaunchProfile;
 pub const RunOutcome = config.RunOutcome;
 pub const default_shell_config = config.default_shell_config;
 pub const DoctorReport = doctor.DoctorReport;
@@ -50,7 +51,50 @@ pub fn check_host(allocator: std.mem.Allocator) !DoctorReport {
     return doctor.check(allocator);
 }
 
+pub fn with_profile(jail_config: *JailConfig, profile: LaunchProfile) void {
+    switch (profile) {
+        .minimal => {
+            jail_config.isolation = .{
+                .net = false,
+                .mount = false,
+                .pid = false,
+                .uts = false,
+                .ipc = false,
+            };
+            jail_config.process.new_session = false;
+            jail_config.process.die_with_parent = false;
+            jail_config.process.clear_env = false;
+        },
+        .default => {
+            jail_config.isolation = .{};
+            jail_config.process.new_session = false;
+            jail_config.process.die_with_parent = false;
+            jail_config.process.clear_env = false;
+        },
+        .full_isolation => {
+            jail_config.isolation = .{};
+            jail_config.process.new_session = true;
+            jail_config.process.die_with_parent = true;
+            jail_config.process.clear_env = true;
+        },
+    }
+}
+
+pub fn validate(jail_config: JailConfig) !void {
+    if (jail_config.name.len == 0) return error.InvalidName;
+    if (jail_config.rootfs_path.len == 0) return error.InvalidRootfsPath;
+    if (jail_config.cmd.len == 0) return error.MissingCommand;
+    if (jail_config.cmd[0].len == 0) return error.InvalidCommand;
+    if (jail_config.process.argv0) |argv0| {
+        if (argv0.len == 0) return error.InvalidArgv0;
+    }
+    if (jail_config.process.chdir) |chdir_path| {
+        if (chdir_path.len == 0) return error.InvalidChdir;
+    }
+}
+
 pub fn spawn(jail_config: JailConfig, allocator: std.mem.Allocator) !Session {
+    try validate(jail_config);
     try runtime.init();
     var container = try Container.init(jail_config, allocator);
     const pid = try container.spawn();
@@ -77,4 +121,33 @@ fn build_shell_cmd(shell_config: ShellConfig, allocator: std.mem.Allocator) ![]c
         cmd[idx + 1] = arg;
     }
     return cmd;
+}
+
+test "with_profile full_isolation sets hardened defaults" {
+    var cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+    };
+
+    with_profile(&cfg, .full_isolation);
+
+    try std.testing.expect(cfg.isolation.net);
+    try std.testing.expect(cfg.isolation.mount);
+    try std.testing.expect(cfg.isolation.pid);
+    try std.testing.expect(cfg.isolation.uts);
+    try std.testing.expect(cfg.isolation.ipc);
+    try std.testing.expect(cfg.process.new_session);
+    try std.testing.expect(cfg.process.die_with_parent);
+    try std.testing.expect(cfg.process.clear_env);
+}
+
+test "validate rejects empty rootfs" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "",
+        .cmd = &.{"/bin/sh"},
+    };
+
+    try std.testing.expectError(error.InvalidRootfsPath, validate(cfg));
 }

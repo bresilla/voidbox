@@ -1,4 +1,5 @@
 const std = @import("std");
+const LaunchProfile = @import("config.zig").LaunchProfile;
 
 inline fn eql(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
@@ -11,6 +12,7 @@ pub const RunArgs = struct {
     cmd: []const []const u8,
     resources: Resources,
     isolation: Isolation,
+    profile: ?LaunchProfile = null,
 
     pub const Isolation = struct {
         net: bool = true,
@@ -30,6 +32,7 @@ pub const RunArgs = struct {
 
         var resources = Resources{};
         var isolation = Isolation{};
+        var profile: ?LaunchProfile = null;
         var idx: usize = 0;
         while (idx < argv.items.len) {
             const arg = argv.items[idx];
@@ -57,6 +60,10 @@ pub const RunArgs = struct {
                 isolation.uts = false;
             } else if (eql(arg, "--no-ipc")) {
                 isolation.ipc = false;
+            } else if (eql(arg, "--profile")) {
+                idx += 1;
+                if (idx >= argv.items.len) return error.MissingValue;
+                profile = parseProfile(argv.items[idx]) orelse return error.InvalidProfile;
             } else {
                 return error.InvalidOption;
             }
@@ -82,10 +89,18 @@ pub const RunArgs = struct {
         return .{
             .resources = resources,
             .isolation = isolation,
+            .profile = profile,
             .name = name,
             .rootfs_path = rootfs_path,
             .cmd = cmd,
         };
+    }
+
+    fn parseProfile(value: []const u8) ?LaunchProfile {
+        if (eql(value, "minimal")) return .minimal;
+        if (eql(value, "default")) return .default;
+        if (eql(value, "full_isolation")) return .full_isolation;
+        return null;
     }
 };
 
@@ -109,6 +124,7 @@ pub const help =
     \\run [resource flags] [namespace flags] <name> <rootfs_path> [cmd ...]
     \\  resource flags: -mem <val> -cpu <val> -pids <val>
     \\  namespace flags: --no-net --no-mount --no-pid --no-uts --no-ipc
+    \\  profile: --profile minimal|default|full_isolation
     \\  default command when omitted: /bin/sh
     \\ps
     \\doctor

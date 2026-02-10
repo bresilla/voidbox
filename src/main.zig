@@ -41,10 +41,14 @@ pub fn main() !void {
                 try c.print(stdout);
             }
         },
-        .doctor => {
+        .doctor => |d| {
             const report = try voidbox.check_host(allocator);
             const stdout = std.fs.File.stdout().deprecatedWriter();
-            try report.print(stdout);
+            if (d.json) {
+                try report.printJson(stdout);
+            } else {
+                try report.print(stdout);
+            }
         },
     }
 }

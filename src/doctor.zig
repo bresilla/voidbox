@@ -74,6 +74,35 @@ pub const DoctorReport = struct {
             try writer.print("  recommendation: install iptables or nft for bridge NAT\n", .{});
         }
     }
+
+    pub fn printJson(self: DoctorReport, writer: anytype) !void {
+        try writer.print("{{\"is_linux\":{}", .{self.is_linux});
+        if (self.kernel_version) |v| {
+            try writer.print(",\"kernel_version\":{{\"major\":{},\"minor\":{},\"patch\":{}}}", .{ v.major, v.minor, v.patch });
+        } else {
+            try writer.print(",\"kernel_version\":null", .{});
+        }
+        try writer.print(",\"namespaces\":{{\"user\":{},\"mount\":{},\"pid\":{},\"net\":{},\"uts\":{},\"ipc\":{}}}", .{ self.has_user_ns, self.has_mount_ns, self.has_pid_ns, self.has_net_ns, self.has_uts_ns, self.has_ipc_ns });
+        try writer.print(",\"cgroup_v2_available\":{}", .{self.cgroup_v2_available});
+        try writer.print(",\"net_tools\":{{\"iptables\":{},\"nft\":{}}}", .{ self.iptables_available, self.nft_available });
+        if (self.unpriv_userns_clone_enabled) |enabled| {
+            try writer.print(",\"unpriv_userns_clone_enabled\":{}", .{enabled});
+        } else {
+            try writer.print(",\"unpriv_userns_clone_enabled\":null", .{});
+        }
+        try writer.print(",\"capabilities\":{{\"overlayfs\":{},\"seccomp_filter\":{},\"namespace_attach\":{},\"userns_mapping\":{},\"procfs\":{},\"tmpfs\":{},\"devtmpfs\":{}}}", .{
+            self.capabilities.overlayfs,
+            self.capabilities.seccomp_filter,
+            self.capabilities.namespace_attach,
+            self.capabilities.userns_mapping,
+            self.capabilities.procfs,
+            self.capabilities.tmpfs,
+            self.capabilities.devtmpfs,
+        });
+        try writer.print(",\"readiness_score\":{}", .{self.readiness_score});
+        try writer.print(",\"full_isolation_ready\":{}", .{self.full_isolation_ready});
+        try writer.print("}}\n", .{});
+    }
 };
 
 pub fn check(allocator: std.mem.Allocator) !DoctorReport {

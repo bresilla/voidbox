@@ -2,6 +2,7 @@ const std = @import("std");
 const linux = std.os.linux;
 const checkErr = @import("utils.zig").checkErr;
 const FsAction = @import("config.zig").FsAction;
+const OverlaySource = @import("config.zig").OverlaySource;
 
 rootfs: []const u8,
 actions: []const FsAction,
@@ -35,6 +36,10 @@ fn setupDefaultMounts(self: *Fs) !void {
 }
 
 fn executeActions(self: *Fs) !void {
+    var overlay_sources = std.ArrayList(OverlaySource).empty;
+    defer overlay_sources.deinit(std.heap.page_allocator);
+    var tmp_overlay_counter: usize = 0;
+
     for (self.actions) |action| {
         switch (action) {
             .bind => |mount_pair| {
@@ -92,12 +97,58 @@ fn executeActions(self: *Fs) !void {
                 const flags = linux.MS.REMOUNT | linux.MS.RDONLY;
                 try mountPath(null, dest, null, flags, null, error.RemountReadOnly);
             },
-            .overlay_src => {},
-            .overlay, .tmp_overlay, .ro_overlay => {
-                return error.OverlayNotSupportedYet;
+            .overlay_src => |src| {
+                try overlay_sources.append(std.heap.page_allocator, src);
+            },
+            .overlay => |o| {
+                const lower = findOverlaySource(overlay_sources.items, o.source_key) orelse return error.MissingOverlaySource;
+
+                try ensurePath(o.dest);
+                try ensurePath(o.upper);
+                try ensurePath(o.work);
+
+                var opts_buf: [std.posix.PATH_MAX - 1]u8 = undefined;
+                const opts = try std.fmt.bufPrint(&opts_buf, "lowerdir={s},upperdir={s},workdir={s}", .{ lower, o.upper, o.work });
+                try mountPath("overlay", o.dest, "overlay", 0, opts, error.MountOverlay);
+            },
+            .tmp_overlay => |o| {
+                const lower = findOverlaySource(overlay_sources.items, o.source_key) orelse return error.MissingOverlaySource;
+
+                try ensurePath(o.dest);
+
+                const overlay_base = try std.fmt.allocPrint(std.heap.page_allocator, "/tmp/.voidbox-overlay/{s}-{d}", .{ o.source_key, tmp_overlay_counter });
+                defer std.heap.page_allocator.free(overlay_base);
+                const upper = try std.fmt.allocPrint(std.heap.page_allocator, "{s}/upper", .{overlay_base});
+                defer std.heap.page_allocator.free(upper);
+                const work = try std.fmt.allocPrint(std.heap.page_allocator, "{s}/work", .{overlay_base});
+                defer std.heap.page_allocator.free(work);
+
+                try ensurePath(upper);
+                try ensurePath(work);
+
+                var opts_buf: [std.posix.PATH_MAX - 1]u8 = undefined;
+                const opts = try std.fmt.bufPrint(&opts_buf, "lowerdir={s},upperdir={s},workdir={s}", .{ lower, upper, work });
+                try mountPath("overlay", o.dest, "overlay", 0, opts, error.MountOverlay);
+                tmp_overlay_counter += 1;
+            },
+            .ro_overlay => |o| {
+                const lower = findOverlaySource(overlay_sources.items, o.source_key) orelse return error.MissingOverlaySource;
+
+                try ensurePath(o.dest);
+
+                var opts_buf: [std.posix.PATH_MAX - 1]u8 = undefined;
+                const opts = try std.fmt.bufPrint(&opts_buf, "lowerdir={s}", .{lower});
+                try mountPath("overlay", o.dest, "overlay", linux.MS.RDONLY, opts, error.MountOverlay);
             },
         }
     }
+}
+
+fn findOverlaySource(sources: []const OverlaySource, key: []const u8) ?[]const u8 {
+    for (sources) |src| {
+        if (std.mem.eql(u8, src.key, key)) return src.path;
+    }
+    return null;
 }
 
 fn formatTmpfsOpts(buffer: []u8, tmpfs: @import("config.zig").TmpfsMount) ![]const u8 {
@@ -162,4 +213,14 @@ test "formatTmpfsOpts formats size and mode" {
     var buf: [64]u8 = undefined;
     const opts = try formatTmpfsOpts(&buf, .{ .dest = "/tmp", .size_bytes = 1024, .mode = 0o700 });
     try std.testing.expectEqualStrings("size=1024,mode=700", opts);
+}
+
+test "findOverlaySource resolves source by key" {
+    const sources = [_]OverlaySource{
+        .{ .key = "base", .path = "/layers/base" },
+        .{ .key = "dev", .path = "/layers/dev" },
+    };
+
+    try std.testing.expectEqualStrings("/layers/dev", findOverlaySource(&sources, "dev").?);
+    try std.testing.expect(findOverlaySource(&sources, "none") == null);
 }

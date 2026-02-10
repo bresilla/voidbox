@@ -3,6 +3,7 @@ const Container = @import("container.zig");
 const config = @import("config.zig");
 const doctor = @import("doctor.zig");
 const runtime = @import("runtime.zig");
+const status = @import("status.zig");
 
 pub const JailConfig = config.JailConfig;
 pub const ShellConfig = config.ShellConfig;
@@ -12,6 +13,7 @@ pub const ProcessOptions = config.ProcessOptions;
 pub const SecurityOptions = config.SecurityOptions;
 pub const SeccompMode = config.SecurityOptions.SeccompMode;
 pub const SeccompInstruction = config.SecurityOptions.SeccompInstruction;
+pub const StatusOptions = config.StatusOptions;
 pub const EnvironmentEntry = config.EnvironmentEntry;
 pub const LaunchProfile = config.LaunchProfile;
 pub const FsAction = config.FsAction;
@@ -27,6 +29,7 @@ pub const DoctorReport = doctor.DoctorReport;
 pub const Session = struct {
     container: Container,
     pid: std.posix.pid_t,
+    status: StatusOptions,
     waited: bool = false,
 
     pub fn deinit(self: *Session) void {
@@ -52,6 +55,7 @@ pub fn launch_shell(shell_config: ShellConfig, allocator: std.mem.Allocator) !Ru
         .isolation = shell_config.isolation,
         .process = shell_config.process,
         .security = shell_config.security,
+        .status = shell_config.status,
         .fs_actions = shell_config.fs_actions,
     };
 
@@ -116,6 +120,9 @@ pub fn validate(jail_config: JailConfig) !void {
     }
     for (jail_config.process.set_env) |entry| {
         if (entry.key.len == 0) return error.InvalidSetEnvKey;
+    }
+    if (jail_config.status.json_status_fd) |fd| {
+        if (fd < 0) return error.InvalidStatusFd;
     }
 
     for (jail_config.security.cap_add) |cap| {
@@ -194,9 +201,14 @@ pub fn spawn(jail_config: JailConfig, allocator: std.mem.Allocator) !Session {
     var container = try Container.init(jail_config, allocator);
     const pid = try container.spawn();
 
+    if (jail_config.status.json_status_fd) |fd| {
+        try status.emitJson(fd, "spawned", pid, null);
+    }
+
     return .{
         .container = container,
         .pid = pid,
+        .status = jail_config.status,
     };
 }
 
@@ -205,6 +217,9 @@ pub fn wait(session: *Session) !RunOutcome {
 
     try session.container.wait(session.pid);
     session.waited = true;
+    if (session.status.json_status_fd) |fd| {
+        try status.emitJson(fd, "exited", session.pid, 0);
+    }
     return .{ .pid = session.pid, .exit_code = 0 };
 }
 
@@ -295,6 +310,17 @@ test "minimal profile rejects mount actions" {
 
     with_profile(&cfg, .minimal);
     try std.testing.expectError(error.FsActionsRequireMountNamespace, validate(cfg));
+}
+
+test "validate rejects invalid status fd" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .status = .{ .json_status_fd = -1 },
+    };
+
+    try std.testing.expectError(error.InvalidStatusFd, validate(cfg));
 }
 
 test "security defaults to no_new_privs" {

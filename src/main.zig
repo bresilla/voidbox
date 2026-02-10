@@ -18,6 +18,7 @@ pub fn main() !void {
                 .isolation = r.isolation,
                 .process = r.process,
                 .security = r.security,
+                .status = r.status,
                 .fs_actions = r.fs_actions,
             };
 

@@ -18,6 +18,7 @@ pub const RunArgs = struct {
     isolation: config.IsolationOptions,
     process: config.ProcessOptions,
     security: config.SecurityOptions,
+    status: config.StatusOptions,
     fs_actions: []const FsAction,
     profile: ?LaunchProfile = null,
 
@@ -33,6 +34,7 @@ pub const RunArgs = struct {
         var isolation = config.IsolationOptions{};
         var process = config.ProcessOptions{};
         var security = config.SecurityOptions{};
+        var status = config.StatusOptions{};
         var profile: ?LaunchProfile = null;
 
         var set_env = std.ArrayList(EnvironmentEntry).empty;
@@ -121,6 +123,10 @@ pub const RunArgs = struct {
                 idx += 1;
                 if (idx >= argv.items.len) return error.MissingValue;
                 try cap_add.append(allocator, try std.fmt.parseInt(u8, argv.items[idx], 10));
+            } else if (eql(arg, "--json-status-fd")) {
+                idx += 1;
+                if (idx >= argv.items.len) return error.MissingValue;
+                status.json_status_fd = try std.fmt.parseInt(i32, argv.items[idx], 10);
             } else if (eql(arg, "--bind")) {
                 idx += 1;
                 if (idx >= argv.items.len) return error.MissingValue;
@@ -191,6 +197,7 @@ pub const RunArgs = struct {
             .isolation = isolation,
             .process = process,
             .security = security,
+            .status = status,
             .fs_actions = owned_fs_actions,
             .profile = profile,
             .name = name,
@@ -310,6 +317,7 @@ pub const help =
     \\  profile: --profile minimal|default|full_isolation
     \\  process flags: --chdir <path> --argv0 <value> --setenv KEY=VAL --unsetenv KEY --clearenv --new-session --die-with-parent
     \\  security flags: --no-new-privs --allow-new-privs --seccomp disabled|strict --seccomp-fd <fd> --cap-drop <num> --cap-add <num>
+    \\  status flags: --json-status-fd <fd>
     \\  fs flags: --bind SRC:DEST --ro-bind SRC:DEST --proc DEST --dev DEST --tmpfs DEST[:size=N,mode=OCT] --dir PATH[:MODE] --symlink TARGET:PATH --chmod PATH:MODE --remount-ro DEST
     \\  default command when omitted: /bin/sh
     \\ps

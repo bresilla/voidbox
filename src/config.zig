@@ -73,6 +73,10 @@ pub const ProcessOptions = struct {
     die_with_parent: bool = false,
 };
 
+pub const StatusOptions = struct {
+    json_status_fd: ?i32 = null,
+};
+
 pub const SecurityOptions = struct {
     pub const SeccompMode = enum {
         disabled,
@@ -103,6 +107,7 @@ pub const JailConfig = struct {
     isolation: IsolationOptions = .{},
     process: ProcessOptions = .{},
     security: SecurityOptions = .{},
+    status: StatusOptions = .{},
     fs_actions: []const FsAction = &.{},
 };
 
@@ -115,6 +120,7 @@ pub const ShellConfig = struct {
     isolation: IsolationOptions = .{},
     process: ProcessOptions = .{},
     security: SecurityOptions = .{},
+    status: StatusOptions = .{},
     fs_actions: []const FsAction = &.{},
 };
 

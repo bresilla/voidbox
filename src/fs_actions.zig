@@ -208,6 +208,50 @@ pub fn execute(actions: []const FsAction) !void {
                     try std.posix.fchmodat(std.posix.AT.FDCWD, f.path, @intCast(mode), 0);
                 }
             },
+            .bind_data_fd => |b| {
+                const src = try writeDataSourceFromFd(b.fd, data_bind_counter);
+                defer std.heap.page_allocator.free(src);
+
+                try ensurePath(b.dest);
+                const flags = linux.MS.BIND | linux.MS.REC;
+                try mountPath(src, b.dest, null, flags, null, error.BindMount);
+                try mounted_targets.append(std.heap.page_allocator, .{ .path = b.dest });
+                data_bind_counter += 1;
+            },
+            .ro_bind_data_fd => |b| {
+                const src = try writeDataSourceFromFd(b.fd, data_bind_counter);
+                defer std.heap.page_allocator.free(src);
+
+                try ensurePath(b.dest);
+                const bind_flags = linux.MS.BIND | linux.MS.REC;
+                try mountPath(src, b.dest, null, bind_flags, null, error.BindMount);
+                try mounted_targets.append(std.heap.page_allocator, .{ .path = b.dest });
+
+                const remount_flags = linux.MS.BIND | linux.MS.REMOUNT | linux.MS.RDONLY;
+                try mountPath(null, b.dest, null, remount_flags, null, error.RemountReadOnly);
+                data_bind_counter += 1;
+            },
+            .file_fd => |f| {
+                const parent = std.fs.path.dirname(f.path);
+                if (parent) |p| {
+                    try ensurePath(p);
+                }
+
+                var out_file = try std.fs.cwd().createFile(trimPath(f.path), .{ .truncate = true });
+                defer out_file.close();
+
+                var in_file = std.fs.File{ .handle = f.fd };
+                var buf: [4096]u8 = undefined;
+                while (true) {
+                    const n = try in_file.read(&buf);
+                    if (n == 0) break;
+                    try out_file.writeAll(buf[0..n]);
+                }
+
+                if (current_mode) |mode| {
+                    try std.posix.fchmodat(std.posix.AT.FDCWD, f.path, @intCast(mode), 0);
+                }
+            },
         }
     }
 }
@@ -239,6 +283,26 @@ fn writeDataSource(data: []const u8, index: usize) ![]const u8 {
     var file = try std.fs.cwd().createFile(trimPath(path), .{ .truncate = true });
     defer file.close();
     try file.writeAll(data);
+    return path;
+}
+
+fn writeDataSourceFromFd(fd: i32, index: usize) ![]const u8 {
+    const path = try std.fmt.allocPrint(std.heap.page_allocator, "/tmp/.voidbox-data/{d}", .{index});
+    const parent = std.fs.path.dirname(path);
+    if (parent) |p| {
+        try ensurePath(p);
+    }
+
+    var out_file = try std.fs.cwd().createFile(trimPath(path), .{ .truncate = true });
+    defer out_file.close();
+    var in_file = std.fs.File{ .handle = fd };
+
+    var buf: [4096]u8 = undefined;
+    while (true) {
+        const n = try in_file.read(&buf);
+        if (n == 0) break;
+        try out_file.writeAll(buf[0..n]);
+    }
     return path;
 }
 

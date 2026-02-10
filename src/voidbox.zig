@@ -75,6 +75,8 @@ pub const TmpOverlayAction = config.TmpOverlayAction;
 pub const RoOverlayAction = config.RoOverlayAction;
 pub const DataBindAction = config.DataBindAction;
 pub const FileAction = config.FileAction;
+pub const FdDataBindAction = config.FdDataBindAction;
+pub const FdFileAction = config.FdFileAction;
 pub const RunOutcome = config.RunOutcome;
 pub const default_shell_config = config.default_shell_config;
 pub const DoctorReport = doctor.DoctorReport;
@@ -321,6 +323,18 @@ fn validateFsAction(action: FsAction) !void {
         .file => |f| {
             if (f.path.len == 0) return error.InvalidFsDestination;
         },
+        .bind_data_fd => |b| {
+            if (b.dest.len == 0) return error.InvalidFsDestination;
+            if (b.fd < 0) return error.InvalidFsFd;
+        },
+        .ro_bind_data_fd => |b| {
+            if (b.dest.len == 0) return error.InvalidFsDestination;
+            if (b.fd < 0) return error.InvalidFsFd;
+        },
+        .file_fd => |f| {
+            if (f.path.len == 0) return error.InvalidFsDestination;
+            if (f.fd < 0) return error.InvalidFsFd;
+        },
     }
 }
 
@@ -463,6 +477,17 @@ test "validate rejects invalid fs size modifier" {
     };
 
     try std.testing.expectError(error.InvalidFsSize, validate(cfg));
+}
+
+test "validate rejects invalid fd-based fs action" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .fs_actions = &.{.{ .file_fd = .{ .path = "/x", .fd = -1 } }},
+    };
+
+    try std.testing.expectError(error.InvalidFsFd, validate(cfg));
 }
 
 test "full_isolation profile validates with fs actions" {

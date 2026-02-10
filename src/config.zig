@@ -85,6 +85,16 @@ pub const DataBindAction = struct {
     data: []const u8,
 };
 
+pub const FdDataBindAction = struct {
+    dest: []const u8,
+    fd: i32,
+};
+
+pub const FdFileAction = struct {
+    path: []const u8,
+    fd: i32,
+};
+
 pub const FileAction = struct {
     path: []const u8,
     data: []const u8,
@@ -114,6 +124,9 @@ pub const FsAction = union(enum) {
     bind_data: DataBindAction,
     ro_bind_data: DataBindAction,
     file: FileAction,
+    bind_data_fd: FdDataBindAction,
+    ro_bind_data_fd: FdDataBindAction,
+    file_fd: FdFileAction,
 };
 
 pub const EnvironmentEntry = struct {

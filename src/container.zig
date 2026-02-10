@@ -131,15 +131,7 @@ fn execCmd(self: *Container, uid: linux.uid_t, gid: linux.gid_t) !void {
         try checkErr(linux.prctl(@intFromEnum(linux.PR.SET_NO_NEW_PRIVS), 1, 0, 0, 0), error.NoNewPrivsFailed);
     }
     try self.applyCapabilities();
-    if (self.security.seccomp_mode == .strict) {
-        try checkErr(linux.prctl(@intFromEnum(linux.PR.SET_SECCOMP), 1, 0, 0, 0), error.SeccompFailed);
-    } else if (self.security.seccomp_filter) |filter| {
-        var prog = SeccompProgram{
-            .len = @intCast(filter.len),
-            .filter = @constCast(filter.ptr),
-        };
-        try checkErr(linux.seccomp(SECCOMP_SET_MODE_FILTER, 0, @ptrCast(&prog)), error.SeccompFailed);
-    }
+    try self.applySeccomp();
 
     self.sethostname();
     try self.fs.setup(self.isolation.mount);
@@ -209,6 +201,28 @@ fn applyCapabilities(self: *Container) !void {
     for (self.security.cap_drop) |cap| {
         try checkErr(linux.prctl(@intFromEnum(linux.PR.CAPBSET_DROP), cap, 0, 0, 0), error.CapabilityDropFailed);
     }
+}
+
+fn applySeccomp(self: *Container) !void {
+    if (self.security.seccomp_mode == .strict) {
+        try checkErr(linux.prctl(@intFromEnum(linux.PR.SET_SECCOMP), 1, 0, 0, 0), error.SeccompFailed);
+        return;
+    }
+
+    if (self.security.seccomp_filter) |filter| {
+        try applySeccompFilter(filter);
+    }
+    for (self.security.seccomp_filters) |filter| {
+        try applySeccompFilter(filter);
+    }
+}
+
+fn applySeccompFilter(filter: []const SeccompInstruction) !void {
+    var prog = SeccompProgram{
+        .len = @intCast(filter.len),
+        .filter = @constCast(filter.ptr),
+    };
+    try checkErr(linux.seccomp(SECCOMP_SET_MODE_FILTER, 0, @ptrCast(&prog)), error.SeccompFailed);
 }
 
 export fn childFn(a: usize) u8 {

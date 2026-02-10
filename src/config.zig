@@ -91,6 +91,7 @@ pub const SecurityOptions = struct {
     cap_add: []const u8 = &.{},
     seccomp_mode: SeccompMode = .disabled,
     seccomp_filter: ?[]const SeccompInstruction = null,
+    seccomp_filters: []const []const SeccompInstruction = &.{},
     seccomp_filter_fds: []const i32 = &.{},
 };
 

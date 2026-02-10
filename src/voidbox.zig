@@ -127,13 +127,17 @@ pub fn validate(jail_config: JailConfig) !void {
     if (jail_config.security.seccomp_filter_fds.len > 0) {
         return error.SeccompFilterFdsNotSupportedYet;
     }
-    if (jail_config.security.seccomp_mode == .strict and jail_config.security.seccomp_filter != null) {
+    const has_filters = jail_config.security.seccomp_filter != null or jail_config.security.seccomp_filters.len > 0;
+    if (jail_config.security.seccomp_mode == .strict and has_filters) {
         return error.SeccompModeConflict;
     }
     if (jail_config.security.seccomp_filter) |filter| {
         if (filter.len == 0) return error.InvalidSeccompFilter;
     }
-    if ((jail_config.security.seccomp_mode == .strict or jail_config.security.seccomp_filter != null) and !jail_config.security.no_new_privs) {
+    for (jail_config.security.seccomp_filters) |filter| {
+        if (filter.len == 0) return error.InvalidSeccompFilter;
+    }
+    if ((jail_config.security.seccomp_mode == .strict or has_filters) and !jail_config.security.no_new_privs) {
         return error.SeccompRequiresNoNewPrivs;
     }
 
@@ -422,4 +426,43 @@ test "validate accepts seccomp filter baseline" {
     };
 
     try validate(cfg);
+}
+
+test "validate accepts stacked seccomp filters" {
+    const allow_all_a = [_]SeccompInstruction{.{
+        .code = 0x06,
+        .jt = 0,
+        .jf = 0,
+        .k = std.os.linux.seccomp.RET.ALLOW,
+    }};
+    const allow_all_b = [_]SeccompInstruction{.{
+        .code = 0x06,
+        .jt = 0,
+        .jf = 0,
+        .k = std.os.linux.seccomp.RET.ALLOW,
+    }};
+    const stacked = [_][]const SeccompInstruction{ &allow_all_a, &allow_all_b };
+
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .security = .{ .seccomp_filters = &stacked },
+    };
+
+    try validate(cfg);
+}
+
+test "validate rejects empty stacked seccomp filter" {
+    const empty = [_]SeccompInstruction{};
+    const stacked = [_][]const SeccompInstruction{&empty};
+
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .security = .{ .seccomp_filters = &stacked },
+    };
+
+    try std.testing.expectError(error.InvalidSeccompFilter, validate(cfg));
 }

@@ -33,6 +33,7 @@ pub const ValidationError = error{
     MissingOverlaySource,
     AssertUserNsDisabledConflict,
     DisableUserNsConflict,
+    PidNsAttachRequiresUnsharePid,
 };
 
 pub const SpawnError = ValidationError || error{

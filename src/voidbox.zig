@@ -600,3 +600,27 @@ test "validate rejects empty stacked seccomp filter" {
 
     try std.testing.expectError(error.InvalidSeccompFilter, validate(cfg));
 }
+
+test "signalFd writes supervisor sync byte" {
+    var pipefds: [2]i32 = undefined;
+    try std.posix.pipe(&pipefds);
+    defer std.posix.close(pipefds[0]);
+    defer std.posix.close(pipefds[1]);
+
+    try signalFd(pipefds[1]);
+
+    var byte: [1]u8 = undefined;
+    _ = try std.posix.read(pipefds[0], &byte);
+    try std.testing.expectEqual(@as(u8, 1), byte[0]);
+}
+
+test "waitForFd consumes supervisor unblock byte" {
+    var pipefds: [2]i32 = undefined;
+    try std.posix.pipe(&pipefds);
+    defer std.posix.close(pipefds[0]);
+    defer std.posix.close(pipefds[1]);
+
+    const one = [_]u8{1};
+    _ = try std.posix.write(pipefds[1], &one);
+    try waitForFd(pipefds[0]);
+}

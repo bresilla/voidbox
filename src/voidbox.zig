@@ -9,6 +9,7 @@ pub const ShellConfig = config.ShellConfig;
 pub const IsolationOptions = config.IsolationOptions;
 pub const ResourceLimits = config.ResourceLimits;
 pub const ProcessOptions = config.ProcessOptions;
+pub const SecurityOptions = config.SecurityOptions;
 pub const EnvironmentEntry = config.EnvironmentEntry;
 pub const LaunchProfile = config.LaunchProfile;
 pub const FsAction = config.FsAction;
@@ -48,6 +49,7 @@ pub fn launch_shell(shell_config: ShellConfig, allocator: std.mem.Allocator) !Ru
         .resources = shell_config.resources,
         .isolation = shell_config.isolation,
         .process = shell_config.process,
+        .security = shell_config.security,
         .fs_actions = shell_config.fs_actions,
     };
 
@@ -83,6 +85,7 @@ pub fn with_profile(jail_config: *JailConfig, profile: LaunchProfile) void {
             jail_config.process.new_session = true;
             jail_config.process.die_with_parent = true;
             jail_config.process.clear_env = true;
+            jail_config.security.no_new_privs = true;
         },
     }
 }
@@ -267,4 +270,26 @@ test "minimal profile rejects mount actions" {
 
     with_profile(&cfg, .minimal);
     try std.testing.expectError(error.FsActionsRequireMountNamespace, validate(cfg));
+}
+
+test "security defaults to no_new_privs" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+    };
+
+    try std.testing.expect(cfg.security.no_new_privs);
+}
+
+test "full_isolation enforces no_new_privs" {
+    var cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .security = .{ .no_new_privs = false },
+    };
+
+    with_profile(&cfg, .full_isolation);
+    try std.testing.expect(cfg.security.no_new_privs);
 }

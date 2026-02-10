@@ -9,6 +9,7 @@ const Fs = @import("fs.zig");
 const JailConfig = @import("config.zig").JailConfig;
 const IsolationOptions = @import("config.zig").IsolationOptions;
 const ProcessOptions = @import("config.zig").ProcessOptions;
+const SecurityOptions = @import("config.zig").SecurityOptions;
 
 const ChildProcessArgs = struct {
     container: *Container,
@@ -22,6 +23,7 @@ name: []const u8,
 cmd: []const []const u8,
 isolation: IsolationOptions,
 process: ProcessOptions,
+security: SecurityOptions,
 
 fs: Fs,
 net: ?Net,
@@ -35,6 +37,7 @@ pub fn init(run_args: JailConfig, allocator: std.mem.Allocator) !Container {
         .cmd = run_args.cmd,
         .isolation = run_args.isolation,
         .process = run_args.process,
+        .security = run_args.security,
         .net = if (run_args.isolation.net) try Net.init(allocator, run_args.name) else null,
         .allocator = allocator,
         .cgroup = try Cgroup.init(run_args.name, run_args.resources, allocator),
@@ -114,6 +117,9 @@ fn execCmd(self: *Container, uid: linux.uid_t, gid: linux.gid_t) !void {
     }
     if (self.process.die_with_parent) {
         try checkErr(linux.prctl(@intFromEnum(linux.PR.SET_PDEATHSIG), @as(usize, @intCast(c.SIGKILL)), 0, 0, 0), error.PrctlFailed);
+    }
+    if (self.security.no_new_privs) {
+        try checkErr(linux.prctl(@intFromEnum(linux.PR.SET_NO_NEW_PRIVS), 1, 0, 0, 0), error.NoNewPrivsFailed);
     }
 
     self.sethostname();

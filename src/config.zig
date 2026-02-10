@@ -73,6 +73,10 @@ pub const ProcessOptions = struct {
     die_with_parent: bool = false,
 };
 
+pub const SecurityOptions = struct {
+    no_new_privs: bool = true,
+};
+
 pub const JailConfig = struct {
     name: []const u8,
     rootfs_path: []const u8,
@@ -80,6 +84,7 @@ pub const JailConfig = struct {
     resources: ResourceLimits = .{},
     isolation: IsolationOptions = .{},
     process: ProcessOptions = .{},
+    security: SecurityOptions = .{},
     fs_actions: []const FsAction = &.{},
 };
 
@@ -91,6 +96,7 @@ pub const ShellConfig = struct {
     resources: ResourceLimits = .{},
     isolation: IsolationOptions = .{},
     process: ProcessOptions = .{},
+    security: SecurityOptions = .{},
     fs_actions: []const FsAction = &.{},
 };
 

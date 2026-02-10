@@ -33,6 +33,7 @@ pub const ValidationError = error{
     MissingOverlaySource,
     AssertUserNsDisabledConflict,
     DisableUserNsConflict,
+    DisableUserNsRequiresUserNs,
     PidNsAttachRequiresUnsharePid,
     UserNs2RequiresUserNs,
 };

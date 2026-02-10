@@ -134,7 +134,7 @@ pub fn wait(self: *Container, pid: linux.pid_t) !u8 {
 // initializes the container environment
 // and executes the user passed cmd
 fn execCmd(self: *Container, uid: linux.uid_t, gid: linux.gid_t) !void {
-    try process_exec.prepare(self.allocator, uid, gid, self.isolation, self.process, self.security, self.namespace_fds);
+    try process_exec.prepare(self.allocator, uid, gid, self.process, self.security, self.namespace_fds);
 
     self.sethostname();
     try self.fs.setup(self.isolation.mount);

@@ -1,7 +1,10 @@
 const std = @import("std");
 const linux = std.os.linux;
 const checkErr = @import("utils.zig").checkErr;
-const c = @cImport(@cInclude("signal.h"));
+const c = @cImport({
+    @cInclude("signal.h");
+    @cInclude("sys/wait.h");
+});
 
 const IsolationOptions = @import("config.zig").IsolationOptions;
 const NamespaceFds = @import("config.zig").NamespaceFds;
@@ -55,8 +58,8 @@ pub fn writeUserRootMappings(allocator: std.mem.Allocator, pid: linux.pid_t) !vo
 }
 
 pub fn assertUserNsDisabled() !void {
-    const disabled = userNsDisabledOnHost() orelse return error.UserNsStateUnknown;
-    if (!disabled) return error.UserNsNotDisabled;
+    const probe_disabled = try probeUserNsDisabled();
+    if (!probe_disabled) return error.UserNsNotDisabled;
 }
 
 pub fn userNsDisabledOnHost() ?bool {
@@ -75,6 +78,24 @@ fn readBoolSysctlZeroIsTrue(path: []const u8) ?bool {
     const trimmed = std.mem.trim(u8, content, " \n\t\r");
     const value = std.fmt.parseInt(u64, trimmed, 10) catch return null;
     return value == 0;
+}
+
+fn probeUserNsDisabled() !bool {
+    const child_pid = std.posix.fork() catch return error.UserNsStateUnknown;
+    if (child_pid == 0) {
+        checkErr(linux.unshare(linux.CLONE.NEWUSER), error.UnshareFailed) catch std.posix.exit(0);
+        std.posix.exit(1);
+    }
+
+    const wait_res = std.posix.waitpid(child_pid, 0);
+    const status = @as(c_int, @bitCast(wait_res.status));
+    if (c.WIFEXITED(status)) {
+        const code = c.WEXITSTATUS(status);
+        if (code == 0) return true;
+        if (code == 1) return false;
+    }
+
+    return error.UserNsStateUnknown;
 }
 
 fn attachNamespaceFd(fd: i32, nstype: u32) !void {

@@ -26,10 +26,6 @@ pub const Session = struct {
 };
 
 pub fn spawn(jail_config: JailConfig, allocator: std.mem.Allocator) !Session {
-    if (jail_config.security.assert_userns_disabled) {
-        try namespace.assertUserNsDisabled();
-    }
-
     if (jail_config.status.block_fd) |fd| {
         try waitForFd(fd);
     }

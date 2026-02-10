@@ -23,31 +23,16 @@ pub fn validate(isolation: IsolationOptions, namespace_fds: NamespaceFds, securi
     if (security.disable_userns and namespace_fds.user2 != null) {
         return error.DisableUserNsConflict;
     }
+    if (security.disable_userns and !isolation.user) {
+        return error.DisableUserNsRequiresUserNs;
+    }
     if (namespace_fds.user2 != null and namespace_fds.user == null) {
         return error.UserNs2RequiresUserNs;
     }
 }
 
 pub fn normalized(jail_config: JailConfig) JailConfig {
-    var out = jail_config;
-    if (out.security.disable_userns) {
-        out.isolation.user = false;
-        out.namespace_fds.user = null;
-        out.namespace_fds.user2 = null;
-    }
-    return out;
-}
-
-test "normalized disables user unshare when requested" {
-    var cfg: JailConfig = .{
-        .name = "x",
-        .rootfs_path = "/",
-        .cmd = &.{"/bin/sh"},
-    };
-    cfg.security.disable_userns = true;
-
-    const out = normalized(cfg);
-    try @import("std").testing.expect(!out.isolation.user);
+    return jail_config;
 }
 
 test "validate rejects disable_userns with attached userns" {
@@ -61,6 +46,18 @@ test "validate rejects disable_userns with attached userns" {
     };
 
     try @import("std").testing.expectError(error.DisableUserNsConflict, validate(cfg.isolation, cfg.namespace_fds, cfg.security));
+}
+
+test "validate requires user namespace when disable_userns is set" {
+    const cfg: JailConfig = .{
+        .name = "x",
+        .rootfs_path = "/",
+        .cmd = &.{"/bin/sh"},
+        .isolation = .{ .user = false },
+        .security = .{ .disable_userns = true },
+    };
+
+    try @import("std").testing.expectError(error.DisableUserNsRequiresUserNs, validate(cfg.isolation, cfg.namespace_fds, cfg.security));
 }
 
 test "validate rejects pidns attach without unshare pid" {

@@ -92,6 +92,10 @@ fn executeActions(self: *Fs) !void {
                 const flags = linux.MS.REMOUNT | linux.MS.RDONLY;
                 try mountPath(null, dest, null, flags, null, error.RemountReadOnly);
             },
+            .overlay_src => {},
+            .overlay, .tmp_overlay, .ro_overlay => {
+                return error.OverlayNotSupportedYet;
+            },
         }
     }
 }

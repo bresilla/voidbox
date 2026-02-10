@@ -55,6 +55,28 @@ pub const ChmodAction = struct {
     mode: u32,
 };
 
+pub const OverlaySource = struct {
+    key: []const u8,
+    path: []const u8,
+};
+
+pub const OverlayAction = struct {
+    source_key: []const u8,
+    upper: []const u8,
+    work: []const u8,
+    dest: []const u8,
+};
+
+pub const TmpOverlayAction = struct {
+    source_key: []const u8,
+    dest: []const u8,
+};
+
+pub const RoOverlayAction = struct {
+    source_key: []const u8,
+    dest: []const u8,
+};
+
 pub const FsAction = union(enum) {
     bind: MountPair,
     ro_bind: MountPair,
@@ -65,6 +87,10 @@ pub const FsAction = union(enum) {
     symlink: SymlinkAction,
     chmod: ChmodAction,
     remount_ro: []const u8,
+    overlay_src: OverlaySource,
+    overlay: OverlayAction,
+    tmp_overlay: TmpOverlayAction,
+    ro_overlay: RoOverlayAction,
 };
 
 pub const EnvironmentEntry = struct {

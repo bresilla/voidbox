@@ -23,6 +23,10 @@ pub const TmpfsMount = config.TmpfsMount;
 pub const DirAction = config.DirAction;
 pub const SymlinkAction = config.SymlinkAction;
 pub const ChmodAction = config.ChmodAction;
+pub const OverlaySource = config.OverlaySource;
+pub const OverlayAction = config.OverlayAction;
+pub const TmpOverlayAction = config.TmpOverlayAction;
+pub const RoOverlayAction = config.RoOverlayAction;
 pub const RunOutcome = config.RunOutcome;
 pub const default_shell_config = config.default_shell_config;
 pub const DoctorReport = doctor.DoctorReport;
@@ -182,6 +186,7 @@ pub fn validate(jail_config: JailConfig) !void {
     for (jail_config.fs_actions) |action| {
         try validateFsAction(action);
     }
+    try validateFsTopology(jail_config.fs_actions);
 }
 
 fn validateFsAction(action: FsAction) !void {
@@ -223,7 +228,63 @@ fn validateFsAction(action: FsAction) !void {
         .remount_ro => |dest| {
             if (dest.len == 0) return error.InvalidFsDestination;
         },
+        .overlay_src => |src| {
+            if (src.key.len == 0) return error.InvalidOverlaySourceKey;
+            if (src.path.len == 0) return error.InvalidFsSource;
+        },
+        .overlay => |o| {
+            if (o.source_key.len == 0) return error.InvalidOverlaySourceKey;
+            if (o.upper.len == 0 or o.work.len == 0) return error.InvalidOverlayPath;
+            if (o.dest.len == 0) return error.InvalidFsDestination;
+        },
+        .tmp_overlay => |o| {
+            if (o.source_key.len == 0) return error.InvalidOverlaySourceKey;
+            if (o.dest.len == 0) return error.InvalidFsDestination;
+        },
+        .ro_overlay => |o| {
+            if (o.source_key.len == 0) return error.InvalidOverlaySourceKey;
+            if (o.dest.len == 0) return error.InvalidFsDestination;
+        },
     }
+}
+
+fn validateFsTopology(actions: []const FsAction) !void {
+    for (actions, 0..) |action, idx| {
+        switch (action) {
+            .overlay_src => |src| {
+                if (overlaySourceSeenBefore(actions, idx, src.key)) {
+                    return error.DuplicateOverlaySourceKey;
+                }
+            },
+            .overlay => |o| {
+                if (!overlaySourceSeenBefore(actions, idx + 1, o.source_key)) {
+                    return error.MissingOverlaySource;
+                }
+            },
+            .tmp_overlay => |o| {
+                if (!overlaySourceSeenBefore(actions, idx + 1, o.source_key)) {
+                    return error.MissingOverlaySource;
+                }
+            },
+            .ro_overlay => |o| {
+                if (!overlaySourceSeenBefore(actions, idx + 1, o.source_key)) {
+                    return error.MissingOverlaySource;
+                }
+            },
+            else => {},
+        }
+    }
+}
+
+fn overlaySourceSeenBefore(actions: []const FsAction, end_exclusive: usize, key: []const u8) bool {
+    var i: usize = 0;
+    while (i < end_exclusive and i < actions.len) : (i += 1) {
+        switch (actions[i]) {
+            .overlay_src => |src| if (std.mem.eql(u8, src.key, key)) return true,
+            else => {},
+        }
+    }
+    return false;
 }
 
 pub fn spawn(jail_config: JailConfig, allocator: std.mem.Allocator) !Session {
@@ -599,6 +660,47 @@ test "validate rejects empty stacked seccomp filter" {
     };
 
     try std.testing.expectError(error.InvalidSeccompFilter, validate(cfg));
+}
+
+test "validate accepts overlay source topology" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .fs_actions = &.{
+            .{ .overlay_src = .{ .key = "base", .path = "/layers/base" } },
+            .{ .ro_overlay = .{ .source_key = "base", .dest = "/" } },
+        },
+    };
+
+    try validate(cfg);
+}
+
+test "validate rejects missing overlay source" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .fs_actions = &.{
+            .{ .ro_overlay = .{ .source_key = "base", .dest = "/" } },
+        },
+    };
+
+    try std.testing.expectError(error.MissingOverlaySource, validate(cfg));
+}
+
+test "validate rejects duplicate overlay source keys" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .fs_actions = &.{
+            .{ .overlay_src = .{ .key = "base", .path = "/layers/a" } },
+            .{ .overlay_src = .{ .key = "base", .path = "/layers/b" } },
+        },
+    };
+
+    try std.testing.expectError(error.DuplicateOverlaySourceKey, validate(cfg));
 }
 
 test "signalFd writes supervisor sync byte" {

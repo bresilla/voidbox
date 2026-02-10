@@ -30,6 +30,9 @@ pub const RunArgs = struct {
             try argv.append(allocator, val);
         }
 
+        var expanded = try expandArgsFd(allocator, argv.items);
+        defer allocator.free(expanded);
+
         var resources = config.ResourceLimits{};
         var isolation = config.IsolationOptions{};
         var process = config.ProcessOptions{};
@@ -51,22 +54,22 @@ pub const RunArgs = struct {
         defer fs_actions.deinit(allocator);
 
         var idx: usize = 0;
-        while (idx < argv.items.len) {
-            const arg = argv.items[idx];
+        while (idx < expanded.len) {
+            const arg = expanded[idx];
             if (!std.mem.startsWith(u8, arg, "-")) break;
 
             if (eql(arg, "-m") or eql(arg, "-mem")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                resources.mem = argv.items[idx];
+                if (idx >= expanded.len) return error.MissingValue;
+                resources.mem = expanded[idx];
             } else if (eql(arg, "-c") or eql(arg, "-cpu")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                resources.cpu = argv.items[idx];
+                if (idx >= expanded.len) return error.MissingValue;
+                resources.cpu = expanded[idx];
             } else if (eql(arg, "-p") or eql(arg, "-pids")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                resources.pids = argv.items[idx];
+                if (idx >= expanded.len) return error.MissingValue;
+                resources.pids = expanded[idx];
             } else if (eql(arg, "--no-net")) {
                 isolation.net = false;
             } else if (eql(arg, "--no-mount")) {
@@ -79,24 +82,24 @@ pub const RunArgs = struct {
                 isolation.ipc = false;
             } else if (eql(arg, "--profile")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                profile = parseProfile(argv.items[idx]) orelse return error.InvalidProfile;
+                if (idx >= expanded.len) return error.MissingValue;
+                profile = parseProfile(expanded[idx]) orelse return error.InvalidProfile;
             } else if (eql(arg, "--chdir")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                process.chdir = argv.items[idx];
+                if (idx >= expanded.len) return error.MissingValue;
+                process.chdir = expanded[idx];
             } else if (eql(arg, "--argv0")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                process.argv0 = argv.items[idx];
+                if (idx >= expanded.len) return error.MissingValue;
+                process.argv0 = expanded[idx];
             } else if (eql(arg, "--setenv")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try set_env.append(allocator, try parseSetEnv(argv.items[idx]));
+                if (idx >= expanded.len) return error.MissingValue;
+                try set_env.append(allocator, try parseSetEnv(expanded[idx]));
             } else if (eql(arg, "--unsetenv")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try unset_env.append(allocator, argv.items[idx]);
+                if (idx >= expanded.len) return error.MissingValue;
+                try unset_env.append(allocator, expanded[idx]);
             } else if (eql(arg, "--clearenv")) {
                 process.clear_env = true;
             } else if (eql(arg, "--new-session")) {
@@ -109,92 +112,92 @@ pub const RunArgs = struct {
                 security.no_new_privs = false;
             } else if (eql(arg, "--seccomp")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                security.seccomp_mode = parseSeccompMode(argv.items[idx]) orelse return error.InvalidSeccompMode;
+                if (idx >= expanded.len) return error.MissingValue;
+                security.seccomp_mode = parseSeccompMode(expanded[idx]) orelse return error.InvalidSeccompMode;
             } else if (eql(arg, "--seccomp-fd")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try seccomp_fds.append(allocator, try std.fmt.parseInt(i32, argv.items[idx], 10));
+                if (idx >= expanded.len) return error.MissingValue;
+                try seccomp_fds.append(allocator, try std.fmt.parseInt(i32, expanded[idx], 10));
             } else if (eql(arg, "--cap-drop")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try cap_drop.append(allocator, try std.fmt.parseInt(u8, argv.items[idx], 10));
+                if (idx >= expanded.len) return error.MissingValue;
+                try cap_drop.append(allocator, try std.fmt.parseInt(u8, expanded[idx], 10));
             } else if (eql(arg, "--cap-add")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try cap_add.append(allocator, try std.fmt.parseInt(u8, argv.items[idx], 10));
+                if (idx >= expanded.len) return error.MissingValue;
+                try cap_add.append(allocator, try std.fmt.parseInt(u8, expanded[idx], 10));
             } else if (eql(arg, "--json-status-fd")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                status.json_status_fd = try std.fmt.parseInt(i32, argv.items[idx], 10);
+                if (idx >= expanded.len) return error.MissingValue;
+                status.json_status_fd = try std.fmt.parseInt(i32, expanded[idx], 10);
             } else if (eql(arg, "--sync-fd")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                status.sync_fd = try std.fmt.parseInt(i32, argv.items[idx], 10);
+                if (idx >= expanded.len) return error.MissingValue;
+                status.sync_fd = try std.fmt.parseInt(i32, expanded[idx], 10);
             } else if (eql(arg, "--block-fd")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                status.block_fd = try std.fmt.parseInt(i32, argv.items[idx], 10);
+                if (idx >= expanded.len) return error.MissingValue;
+                status.block_fd = try std.fmt.parseInt(i32, expanded[idx], 10);
             } else if (eql(arg, "--userns-block-fd")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                status.userns_block_fd = try std.fmt.parseInt(i32, argv.items[idx], 10);
+                if (idx >= expanded.len) return error.MissingValue;
+                status.userns_block_fd = try std.fmt.parseInt(i32, expanded[idx], 10);
             } else if (eql(arg, "--lock-file")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                status.lock_file_path = argv.items[idx];
+                if (idx >= expanded.len) return error.MissingValue;
+                status.lock_file_path = expanded[idx];
             } else if (eql(arg, "--bind")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try fs_actions.append(allocator, .{ .bind = try parseMountPair(argv.items[idx]) });
+                if (idx >= expanded.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .bind = try parseMountPair(expanded[idx]) });
             } else if (eql(arg, "--ro-bind")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try fs_actions.append(allocator, .{ .ro_bind = try parseMountPair(argv.items[idx]) });
+                if (idx >= expanded.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .ro_bind = try parseMountPair(expanded[idx]) });
             } else if (eql(arg, "--proc")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try fs_actions.append(allocator, .{ .proc = argv.items[idx] });
+                if (idx >= expanded.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .proc = expanded[idx] });
             } else if (eql(arg, "--dev")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try fs_actions.append(allocator, .{ .dev = argv.items[idx] });
+                if (idx >= expanded.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .dev = expanded[idx] });
             } else if (eql(arg, "--tmpfs")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try fs_actions.append(allocator, .{ .tmpfs = try parseTmpfs(argv.items[idx]) });
+                if (idx >= expanded.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .tmpfs = try parseTmpfs(expanded[idx]) });
             } else if (eql(arg, "--dir")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try fs_actions.append(allocator, .{ .dir = try parseDir(argv.items[idx]) });
+                if (idx >= expanded.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .dir = try parseDir(expanded[idx]) });
             } else if (eql(arg, "--symlink")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try fs_actions.append(allocator, .{ .symlink = try parseSymlink(argv.items[idx]) });
+                if (idx >= expanded.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .symlink = try parseSymlink(expanded[idx]) });
             } else if (eql(arg, "--chmod")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try fs_actions.append(allocator, .{ .chmod = try parseChmod(argv.items[idx]) });
+                if (idx >= expanded.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .chmod = try parseChmod(expanded[idx]) });
             } else if (eql(arg, "--remount-ro")) {
                 idx += 1;
-                if (idx >= argv.items.len) return error.MissingValue;
-                try fs_actions.append(allocator, .{ .remount_ro = argv.items[idx] });
+                if (idx >= expanded.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .remount_ro = expanded[idx] });
             } else {
                 return error.InvalidOption;
             }
             idx += 1;
         }
 
-        if (idx >= argv.items.len) return error.MissingName;
-        const name = argv.items[idx];
+        if (idx >= expanded.len) return error.MissingName;
+        const name = expanded[idx];
         idx += 1;
 
-        if (idx >= argv.items.len) return error.MissingRootfs;
-        const rootfs_path = argv.items[idx];
+        if (idx >= expanded.len) return error.MissingRootfs;
+        const rootfs_path = expanded[idx];
         idx += 1;
 
-        const cmd = if (idx < argv.items.len)
-            try allocator.dupe([]const u8, argv.items[idx..])
+        const cmd = if (idx < expanded.len)
+            try allocator.dupe([]const u8, expanded[idx..])
         else blk: {
             const default_cmd = try allocator.alloc([]const u8, 1);
             default_cmd[0] = "/bin/sh";
@@ -243,6 +246,50 @@ pub const RunArgs = struct {
         if (eql(value, "disabled")) return .disabled;
         if (eql(value, "strict")) return .strict;
         return null;
+    }
+
+    fn expandArgsFd(allocator: std.mem.Allocator, input: []const []const u8) ![]const []const u8 {
+        var out = std.ArrayList([]const u8).empty;
+        defer out.deinit(allocator);
+
+        var i: usize = 0;
+        while (i < input.len) {
+            const arg = input[i];
+            if (eql(arg, "--args-fd")) {
+                i += 1;
+                if (i >= input.len) return error.MissingValue;
+
+                const fd = try std.fmt.parseInt(i32, input[i], 10);
+                const fd_args = try readArgsFromFd(allocator, fd);
+                defer allocator.free(fd_args);
+
+                for (fd_args) |fd_arg| {
+                    try out.append(allocator, fd_arg);
+                }
+            } else {
+                try out.append(allocator, arg);
+            }
+            i += 1;
+        }
+
+        return out.toOwnedSlice(allocator);
+    }
+
+    fn readArgsFromFd(allocator: std.mem.Allocator, fd: i32) ![]const []const u8 {
+        var file = std.fs.File{ .handle = fd };
+        const content = try file.readToEndAlloc(allocator, 1024 * 1024);
+
+        var out = std.ArrayList([]const u8).empty;
+        defer out.deinit(allocator);
+
+        var it = std.mem.splitScalar(u8, content, '\n');
+        while (it.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \t\r");
+            if (trimmed.len == 0) continue;
+            try out.append(allocator, trimmed);
+        }
+
+        return out.toOwnedSlice(allocator);
     }
 
     fn parseMountPair(value: []const u8) !config.MountPair {
@@ -334,6 +381,7 @@ pub const help =
     \\  process flags: --chdir <path> --argv0 <value> --setenv KEY=VAL --unsetenv KEY --clearenv --new-session --die-with-parent
     \\  security flags: --no-new-privs --allow-new-privs --seccomp disabled|strict --seccomp-fd <fd> --cap-drop <num> --cap-add <num>
     \\  status flags: --json-status-fd <fd> --sync-fd <fd> --block-fd <fd> --userns-block-fd <fd> --lock-file <path>
+    \\  loader flags: --args-fd <fd> (newline-separated extra args)
     \\  fs flags: --bind SRC:DEST --ro-bind SRC:DEST --proc DEST --dev DEST --tmpfs DEST[:size=N,mode=OCT] --dir PATH[:MODE] --symlink TARGET:PATH --chmod PATH:MODE --remount-ro DEST
     \\  default command when omitted: /bin/sh
     \\ps

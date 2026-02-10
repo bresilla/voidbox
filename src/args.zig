@@ -16,6 +16,7 @@ pub const RunArgs = struct {
     cmd: []const []const u8,
     resources: config.ResourceLimits,
     isolation: config.IsolationOptions,
+    namespace_fds: config.NamespaceFds,
     process: config.ProcessOptions,
     security: config.SecurityOptions,
     status: config.StatusOptions,
@@ -35,6 +36,7 @@ pub const RunArgs = struct {
 
         var resources = config.ResourceLimits{};
         var isolation = config.IsolationOptions{};
+        var namespace_fds = config.NamespaceFds{};
         var process = config.ProcessOptions{};
         var security = config.SecurityOptions{};
         var status = config.StatusOptions{};
@@ -80,6 +82,30 @@ pub const RunArgs = struct {
                 isolation.uts = false;
             } else if (eql(arg, "--no-ipc")) {
                 isolation.ipc = false;
+            } else if (eql(arg, "--netns-fd")) {
+                idx += 1;
+                if (idx >= expanded.len) return error.MissingValue;
+                namespace_fds.net = try std.fmt.parseInt(i32, expanded[idx], 10);
+            } else if (eql(arg, "--mntns-fd")) {
+                idx += 1;
+                if (idx >= expanded.len) return error.MissingValue;
+                namespace_fds.mount = try std.fmt.parseInt(i32, expanded[idx], 10);
+            } else if (eql(arg, "--utsns-fd")) {
+                idx += 1;
+                if (idx >= expanded.len) return error.MissingValue;
+                namespace_fds.uts = try std.fmt.parseInt(i32, expanded[idx], 10);
+            } else if (eql(arg, "--ipcns-fd")) {
+                idx += 1;
+                if (idx >= expanded.len) return error.MissingValue;
+                namespace_fds.ipc = try std.fmt.parseInt(i32, expanded[idx], 10);
+            } else if (eql(arg, "--pidns-fd")) {
+                idx += 1;
+                if (idx >= expanded.len) return error.MissingValue;
+                namespace_fds.pid = try std.fmt.parseInt(i32, expanded[idx], 10);
+            } else if (eql(arg, "--userns-fd")) {
+                idx += 1;
+                if (idx >= expanded.len) return error.MissingValue;
+                namespace_fds.user = try std.fmt.parseInt(i32, expanded[idx], 10);
             } else if (eql(arg, "--profile")) {
                 idx += 1;
                 if (idx >= expanded.len) return error.MissingValue;
@@ -214,6 +240,7 @@ pub const RunArgs = struct {
         return .{
             .resources = resources,
             .isolation = isolation,
+            .namespace_fds = namespace_fds,
             .process = process,
             .security = security,
             .status = status,
@@ -377,6 +404,7 @@ pub const help =
     \\run [resource flags] [namespace flags] <name> <rootfs_path> [cmd ...]
     \\  resource flags: -mem <val> -cpu <val> -pids <val>
     \\  namespace flags: --no-net --no-mount --no-pid --no-uts --no-ipc
+    \\  namespace attach flags: --netns-fd <fd> --mntns-fd <fd> --utsns-fd <fd> --ipcns-fd <fd> --pidns-fd <fd> --userns-fd <fd>
     \\  profile: --profile minimal|default|full_isolation
     \\  process flags: --chdir <path> --argv0 <value> --setenv KEY=VAL --unsetenv KEY --clearenv --new-session --die-with-parent
     \\  security flags: --no-new-privs --allow-new-privs --seccomp disabled|strict --seccomp-fd <fd> --cap-drop <num> --cap-add <num>

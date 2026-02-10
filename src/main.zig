@@ -16,6 +16,7 @@ pub fn main() !void {
                 .cmd = r.cmd,
                 .resources = r.resources,
                 .isolation = r.isolation,
+                .namespace_fds = r.namespace_fds,
                 .process = r.process,
                 .security = r.security,
                 .status = r.status,

@@ -14,6 +14,15 @@ pub const IsolationOptions = struct {
     ipc: bool = true,
 };
 
+pub const NamespaceFds = struct {
+    user: ?i32 = null,
+    pid: ?i32 = null,
+    net: ?i32 = null,
+    mount: ?i32 = null,
+    uts: ?i32 = null,
+    ipc: ?i32 = null,
+};
+
 pub const LaunchProfile = enum {
     minimal,
     default,
@@ -109,6 +118,7 @@ pub const JailConfig = struct {
     cmd: []const []const u8,
     resources: ResourceLimits = .{},
     isolation: IsolationOptions = .{},
+    namespace_fds: NamespaceFds = .{},
     process: ProcessOptions = .{},
     security: SecurityOptions = .{},
     status: StatusOptions = .{},
@@ -122,6 +132,7 @@ pub const ShellConfig = struct {
     shell_args: []const []const u8 = &.{},
     resources: ResourceLimits = .{},
     isolation: IsolationOptions = .{},
+    namespace_fds: NamespaceFds = .{},
     process: ProcessOptions = .{},
     security: SecurityOptions = .{},
     status: StatusOptions = .{},

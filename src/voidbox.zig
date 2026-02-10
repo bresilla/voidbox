@@ -8,6 +8,7 @@ const status = @import("status.zig");
 pub const JailConfig = config.JailConfig;
 pub const ShellConfig = config.ShellConfig;
 pub const IsolationOptions = config.IsolationOptions;
+pub const NamespaceFds = config.NamespaceFds;
 pub const ResourceLimits = config.ResourceLimits;
 pub const ProcessOptions = config.ProcessOptions;
 pub const SecurityOptions = config.SecurityOptions;
@@ -57,6 +58,7 @@ pub fn launch_shell(shell_config: ShellConfig, allocator: std.mem.Allocator) !Ru
         .cmd = cmd,
         .resources = shell_config.resources,
         .isolation = shell_config.isolation,
+        .namespace_fds = shell_config.namespace_fds,
         .process = shell_config.process,
         .security = shell_config.security,
         .status = shell_config.status,
@@ -140,6 +142,19 @@ pub fn validate(jail_config: JailConfig) !void {
     if (jail_config.status.lock_file_path) |path| {
         if (path.len == 0) return error.InvalidLockFilePath;
     }
+
+    if (jail_config.namespace_fds.user) |fd| if (fd < 0) return error.InvalidNamespaceFd;
+    if (jail_config.namespace_fds.pid) |fd| if (fd < 0) return error.InvalidNamespaceFd;
+    if (jail_config.namespace_fds.net) |fd| if (fd < 0) return error.InvalidNamespaceFd;
+    if (jail_config.namespace_fds.mount) |fd| if (fd < 0) return error.InvalidNamespaceFd;
+    if (jail_config.namespace_fds.uts) |fd| if (fd < 0) return error.InvalidNamespaceFd;
+    if (jail_config.namespace_fds.ipc) |fd| if (fd < 0) return error.InvalidNamespaceFd;
+
+    if (jail_config.namespace_fds.net != null and jail_config.isolation.net) return error.NamespaceAttachConflict;
+    if (jail_config.namespace_fds.mount != null and jail_config.isolation.mount) return error.NamespaceAttachConflict;
+    if (jail_config.namespace_fds.uts != null and jail_config.isolation.uts) return error.NamespaceAttachConflict;
+    if (jail_config.namespace_fds.ipc != null and jail_config.isolation.ipc) return error.NamespaceAttachConflict;
+    if (jail_config.namespace_fds.pid != null and jail_config.isolation.pid) return error.NamespaceAttachConflict;
 
     for (jail_config.security.cap_add) |cap| {
         if (!std.os.linux.CAP.valid(cap)) return error.InvalidCapability;
@@ -379,6 +394,29 @@ test "validate rejects invalid sync fd" {
     };
 
     try std.testing.expectError(error.InvalidSyncFd, validate(cfg));
+}
+
+test "validate rejects invalid namespace fd" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .namespace_fds = .{ .net = -1 },
+    };
+
+    try std.testing.expectError(error.InvalidNamespaceFd, validate(cfg));
+}
+
+test "validate rejects namespace attach conflict" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .isolation = .{ .net = true },
+        .namespace_fds = .{ .net = 3 },
+    };
+
+    try std.testing.expectError(error.NamespaceAttachConflict, validate(cfg));
 }
 
 test "security defaults to no_new_privs" {

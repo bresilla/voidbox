@@ -8,6 +8,7 @@ const Cgroup = @import("cgroup.zig");
 const Fs = @import("fs.zig");
 const JailConfig = @import("config.zig").JailConfig;
 const IsolationOptions = @import("config.zig").IsolationOptions;
+const NamespaceFds = @import("config.zig").NamespaceFds;
 const ProcessOptions = @import("config.zig").ProcessOptions;
 const SecurityOptions = @import("config.zig").SecurityOptions;
 const StatusOptions = @import("config.zig").StatusOptions;
@@ -32,6 +33,7 @@ const Container = @This();
 name: []const u8,
 cmd: []const []const u8,
 isolation: IsolationOptions,
+namespace_fds: NamespaceFds,
 process: ProcessOptions,
 security: SecurityOptions,
 status: StatusOptions,
@@ -47,6 +49,7 @@ pub fn init(run_args: JailConfig, allocator: std.mem.Allocator) !Container {
         .fs = Fs.init(run_args.rootfs_path, run_args.fs_actions),
         .cmd = run_args.cmd,
         .isolation = run_args.isolation,
+        .namespace_fds = run_args.namespace_fds,
         .process = run_args.process,
         .security = run_args.security,
         .status = run_args.status,
@@ -128,6 +131,8 @@ fn execCmd(self: *Container, uid: linux.uid_t, gid: linux.gid_t) !void {
     try checkErr(linux.setreuid(uid, uid), error.UID);
     try checkErr(linux.setregid(gid, gid), error.GID);
 
+    try self.attachNamespaces();
+
     if (self.process.new_session) {
         _ = std.posix.setsid() catch return error.SetSidFailed;
     }
@@ -146,7 +151,11 @@ fn execCmd(self: *Container, uid: linux.uid_t, gid: linux.gid_t) !void {
         std.posix.chdir(target) catch return error.ChdirFailed;
     }
     if (self.net) |*net| {
-        try net.setupContainerVethIf();
+        if (self.namespace_fds.net != null) {
+            // network namespace already attached; skip interface setup
+        } else {
+            try net.setupContainerVethIf();
+        }
     }
 
     var exec_cmd = self.cmd;
@@ -255,6 +264,29 @@ fn applySeccompFilterFd(self: *Container, fd: i32) !void {
 
     @memcpy(std.mem.sliceAsBytes(filter), raw);
     try applySeccompFilter(filter);
+}
+
+fn attachNamespaces(self: *Container) !void {
+    if (self.namespace_fds.mount) |fd| {
+        try attachNamespaceFd(fd, linux.CLONE.NEWNS);
+    }
+    if (self.namespace_fds.net) |fd| {
+        try attachNamespaceFd(fd, linux.CLONE.NEWNET);
+    }
+    if (self.namespace_fds.uts) |fd| {
+        try attachNamespaceFd(fd, linux.CLONE.NEWUTS);
+    }
+    if (self.namespace_fds.ipc) |fd| {
+        try attachNamespaceFd(fd, linux.CLONE.NEWIPC);
+    }
+    if (self.namespace_fds.pid != null or self.namespace_fds.user != null) {
+        return error.NamespaceAttachNotSupported;
+    }
+}
+
+fn attachNamespaceFd(fd: i32, nstype: u32) !void {
+    const res = linux.syscall2(.setns, @as(usize, @bitCast(@as(isize, fd))), nstype);
+    try checkErr(res, error.SetNsFailed);
 }
 
 export fn childFn(a: usize) u8 {

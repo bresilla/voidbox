@@ -18,6 +18,7 @@ pub fn main() !void {
                 .isolation = r.isolation,
                 .process = r.process,
                 .security = r.security,
+                .fs_actions = r.fs_actions,
             };
 
             if (r.profile) |profile| {

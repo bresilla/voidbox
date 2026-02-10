@@ -3,6 +3,7 @@ const config = @import("config.zig");
 const LaunchProfile = config.LaunchProfile;
 const EnvironmentEntry = config.EnvironmentEntry;
 const SeccompMode = config.SecurityOptions.SeccompMode;
+const FsAction = config.FsAction;
 
 inline fn eql(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
@@ -17,6 +18,7 @@ pub const RunArgs = struct {
     isolation: config.IsolationOptions,
     process: config.ProcessOptions,
     security: config.SecurityOptions,
+    fs_actions: []const FsAction,
     profile: ?LaunchProfile = null,
 
     fn parse(allocator: std.mem.Allocator, args: *std.process.ArgIterator) !RunArgs {
@@ -43,6 +45,8 @@ pub const RunArgs = struct {
         defer cap_add.deinit(allocator);
         var seccomp_fds = std.ArrayList(i32).empty;
         defer seccomp_fds.deinit(allocator);
+        var fs_actions = std.ArrayList(FsAction).empty;
+        defer fs_actions.deinit(allocator);
 
         var idx: usize = 0;
         while (idx < argv.items.len) {
@@ -117,6 +121,42 @@ pub const RunArgs = struct {
                 idx += 1;
                 if (idx >= argv.items.len) return error.MissingValue;
                 try cap_add.append(allocator, try std.fmt.parseInt(u8, argv.items[idx], 10));
+            } else if (eql(arg, "--bind")) {
+                idx += 1;
+                if (idx >= argv.items.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .bind = try parseMountPair(argv.items[idx]) });
+            } else if (eql(arg, "--ro-bind")) {
+                idx += 1;
+                if (idx >= argv.items.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .ro_bind = try parseMountPair(argv.items[idx]) });
+            } else if (eql(arg, "--proc")) {
+                idx += 1;
+                if (idx >= argv.items.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .proc = argv.items[idx] });
+            } else if (eql(arg, "--dev")) {
+                idx += 1;
+                if (idx >= argv.items.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .dev = argv.items[idx] });
+            } else if (eql(arg, "--tmpfs")) {
+                idx += 1;
+                if (idx >= argv.items.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .tmpfs = try parseTmpfs(argv.items[idx]) });
+            } else if (eql(arg, "--dir")) {
+                idx += 1;
+                if (idx >= argv.items.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .dir = try parseDir(argv.items[idx]) });
+            } else if (eql(arg, "--symlink")) {
+                idx += 1;
+                if (idx >= argv.items.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .symlink = try parseSymlink(argv.items[idx]) });
+            } else if (eql(arg, "--chmod")) {
+                idx += 1;
+                if (idx >= argv.items.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .chmod = try parseChmod(argv.items[idx]) });
+            } else if (eql(arg, "--remount-ro")) {
+                idx += 1;
+                if (idx >= argv.items.len) return error.MissingValue;
+                try fs_actions.append(allocator, .{ .remount_ro = argv.items[idx] });
             } else {
                 return error.InvalidOption;
             }
@@ -144,12 +184,14 @@ pub const RunArgs = struct {
         security.cap_drop = try cap_drop.toOwnedSlice(allocator);
         security.cap_add = try cap_add.toOwnedSlice(allocator);
         security.seccomp_filter_fds = try seccomp_fds.toOwnedSlice(allocator);
+        const owned_fs_actions = try fs_actions.toOwnedSlice(allocator);
 
         return .{
             .resources = resources,
             .isolation = isolation,
             .process = process,
             .security = security,
+            .fs_actions = owned_fs_actions,
             .profile = profile,
             .name = name,
             .rootfs_path = rootfs_path,
@@ -179,6 +221,76 @@ pub const RunArgs = struct {
         if (eql(value, "strict")) return .strict;
         return null;
     }
+
+    fn parseMountPair(value: []const u8) !config.MountPair {
+        var parts = std.mem.splitScalar(u8, value, ':');
+        const src = parts.next() orelse return error.InvalidMountPair;
+        const dest = parts.next() orelse return error.InvalidMountPair;
+        if (parts.next() != null) return error.InvalidMountPair;
+        if (src.len == 0 or dest.len == 0) return error.InvalidMountPair;
+        return .{ .src = src, .dest = dest };
+    }
+
+    fn parseTmpfs(value: []const u8) !config.TmpfsMount {
+        var out = config.TmpfsMount{ .dest = value };
+        var first = std.mem.splitScalar(u8, value, ':');
+        out.dest = first.next() orelse return error.InvalidTmpfs;
+        if (out.dest.len == 0) return error.InvalidTmpfs;
+
+        const opts = first.next();
+        if (opts == null) return out;
+        if (first.next() != null) return error.InvalidTmpfs;
+
+        var kvs = std.mem.splitScalar(u8, opts.?, ',');
+        while (kvs.next()) |kv| {
+            var parts = std.mem.splitScalar(u8, kv, '=');
+            const key = parts.next() orelse return error.InvalidTmpfs;
+            const val = parts.next() orelse return error.InvalidTmpfs;
+            if (parts.next() != null) return error.InvalidTmpfs;
+
+            if (eql(key, "size")) {
+                out.size_bytes = try std.fmt.parseInt(usize, val, 10);
+            } else if (eql(key, "mode")) {
+                out.mode = try std.fmt.parseInt(u32, val, 8);
+            } else {
+                return error.InvalidTmpfs;
+            }
+        }
+
+        return out;
+    }
+
+    fn parseDir(value: []const u8) !config.DirAction {
+        var parts = std.mem.splitScalar(u8, value, ':');
+        const path = parts.next() orelse return error.InvalidDir;
+        if (path.len == 0) return error.InvalidDir;
+
+        const mode = if (parts.next()) |m|
+            try std.fmt.parseInt(u32, m, 8)
+        else
+            null;
+
+        if (parts.next() != null) return error.InvalidDir;
+        return .{ .path = path, .mode = mode };
+    }
+
+    fn parseSymlink(value: []const u8) !config.SymlinkAction {
+        var parts = std.mem.splitScalar(u8, value, ':');
+        const target = parts.next() orelse return error.InvalidSymlink;
+        const path = parts.next() orelse return error.InvalidSymlink;
+        if (parts.next() != null) return error.InvalidSymlink;
+        if (target.len == 0 or path.len == 0) return error.InvalidSymlink;
+        return .{ .target = target, .path = path };
+    }
+
+    fn parseChmod(value: []const u8) !config.ChmodAction {
+        var parts = std.mem.splitScalar(u8, value, ':');
+        const path = parts.next() orelse return error.InvalidChmod;
+        const mode = parts.next() orelse return error.InvalidChmod;
+        if (parts.next() != null) return error.InvalidChmod;
+        if (path.len == 0) return error.InvalidChmod;
+        return .{ .path = path, .mode = try std.fmt.parseInt(u32, mode, 8) };
+    }
 };
 
 pub const Args = union(enum) {
@@ -198,6 +310,7 @@ pub const help =
     \\  profile: --profile minimal|default|full_isolation
     \\  process flags: --chdir <path> --argv0 <value> --setenv KEY=VAL --unsetenv KEY --clearenv --new-session --die-with-parent
     \\  security flags: --no-new-privs --allow-new-privs --seccomp disabled|strict --seccomp-fd <fd> --cap-drop <num> --cap-add <num>
+    \\  fs flags: --bind SRC:DEST --ro-bind SRC:DEST --proc DEST --dev DEST --tmpfs DEST[:size=N,mode=OCT] --dir PATH[:MODE] --symlink TARGET:PATH --chmod PATH:MODE --remount-ro DEST
     \\  default command when omitted: /bin/sh
     \\ps
     \\doctor

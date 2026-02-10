@@ -18,6 +18,7 @@ pub fn build(b: *std.Build) !void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
+    const argonaut_dep = b.dependency("argonaut", .{ .target = target, .optimize = optimize });
 
     const voidbox_module = b.createModule(.{
         .root_source_file = b.path("src/voidbox.zig"),
@@ -78,6 +79,24 @@ pub fn build(b: *std.Build) !void {
         .name = "example_embedder_events",
         .root_module = ex_events_module,
     });
+
+    const vb_module = b.createModule(.{
+        .root_source_file = b.path("cli/vb.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    vb_module.addImport("voidbox", voidbox_module);
+    vb_module.addImport("argonaut", argonaut_dep.module("argonaut"));
+
+    const vb = b.addExecutable(.{
+        .name = "vb",
+        .root_module = vb_module,
+    });
+    b.installArtifact(vb);
+
+    const vb_step = b.step("vb", "Compile vb CLI binary");
+    vb_step.dependOn(&vb.step);
 
     const examples_step = b.step("examples", "Compile embedder examples");
     examples_step.dependOn(&ex_shell.step);

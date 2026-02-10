@@ -177,6 +177,8 @@ pub const SecurityOptions = struct {
     seccomp_filter: ?[]const SeccompInstruction = null,
     seccomp_filters: []const []const SeccompInstruction = &.{},
     seccomp_filter_fds: []const i32 = &.{},
+    disable_userns: bool = false,
+    assert_userns_disabled: bool = false,
 };
 
 pub const JailConfig = struct {

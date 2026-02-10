@@ -30,11 +30,14 @@ pub const ValidationError = error{
     InvalidOverlayPath,
     DuplicateOverlaySourceKey,
     MissingOverlaySource,
+    AssertUserNsDisabledConflict,
 };
 
 pub const SpawnError = ValidationError || error{
     OutOfMemory,
     SpawnFailed,
+    UserNsNotDisabled,
+    UserNsStateUnknown,
 };
 
 pub const WaitError = error{

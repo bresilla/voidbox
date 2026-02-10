@@ -1,6 +1,7 @@
 const std = @import("std");
 const Container = @import("container.zig");
 const config = @import("config.zig");
+const namespace = @import("namespace.zig");
 const runtime = @import("runtime.zig");
 const status = @import("status.zig");
 
@@ -25,29 +26,39 @@ pub const Session = struct {
 };
 
 pub fn spawn(jail_config: JailConfig, allocator: std.mem.Allocator) !Session {
-    if (jail_config.status.block_fd) |fd| {
+    var effective = jail_config;
+    if (effective.security.disable_userns) {
+        effective.isolation.user = false;
+        effective.namespace_fds.user = null;
+    }
+
+    if (effective.security.assert_userns_disabled) {
+        try namespace.assertUserNsDisabled();
+    }
+
+    if (effective.status.block_fd) |fd| {
         try waitForFd(fd);
     }
 
-    const lock_file = if (jail_config.status.lock_file_path) |path|
+    const lock_file = if (effective.status.lock_file_path) |path|
         try openOrCreateFile(path)
     else
         null;
 
     try runtime.init();
-    var container = try Container.init(jail_config, allocator);
+    var container = try Container.init(effective, allocator);
     const pid = try container.spawn();
 
     const ns_ids = status.queryNamespaceIds(pid) catch status.NamespaceIds{};
-    try status.emitSpawnedWithOptions(jail_config.status, pid, ns_ids);
-    if (jail_config.status.sync_fd) |fd| {
+    try status.emitSpawnedWithOptions(effective.status, pid, ns_ids);
+    if (effective.status.sync_fd) |fd| {
         try signalFd(fd);
     }
 
     return .{
         .container = container,
         .pid = pid,
-        .status = jail_config.status,
+        .status = effective.status,
         .lock_file = lock_file,
     };
 }

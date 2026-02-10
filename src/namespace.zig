@@ -51,6 +51,29 @@ pub fn writeUserRootMappings(allocator: std.mem.Allocator, pid: linux.pid_t) !vo
     _ = try gid_map.write("0 65534 1");
 }
 
+pub fn assertUserNsDisabled() !void {
+    const disabled = userNsDisabledOnHost() orelse return error.UserNsStateUnknown;
+    if (!disabled) return error.UserNsNotDisabled;
+}
+
+pub fn userNsDisabledOnHost() ?bool {
+    if (readBoolSysctlZeroIsTrue("/proc/sys/user/max_user_namespaces")) |v| return v;
+    if (readBoolSysctlZeroIsTrue("/proc/sys/kernel/unprivileged_userns_clone")) |v| return v;
+    return null;
+}
+
+fn readBoolSysctlZeroIsTrue(path: []const u8) ?bool {
+    const file = std.fs.openFileAbsolute(path, .{}) catch return null;
+    defer file.close();
+
+    const content = file.readToEndAlloc(std.heap.page_allocator, 64) catch return null;
+    defer std.heap.page_allocator.free(content);
+
+    const trimmed = std.mem.trim(u8, content, " \n\t\r");
+    const value = std.fmt.parseInt(u64, trimmed, 10) catch return null;
+    return value == 0;
+}
+
 fn attachNamespaceFd(fd: i32, nstype: u32) !void {
     const res = linux.syscall2(.setns, @as(usize, @bitCast(@as(isize, fd))), nstype);
     try checkErr(res, error.SetNsFailed);

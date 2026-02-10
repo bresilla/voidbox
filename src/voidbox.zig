@@ -159,6 +159,9 @@ pub fn validate(jail_config: JailConfig) ValidationError!void {
     if (jail_config.namespace_fds.ipc != null and jail_config.isolation.ipc) return error.NamespaceAttachConflict;
     if (jail_config.namespace_fds.pid != null and jail_config.isolation.pid) return error.NamespaceAttachConflict;
     if (jail_config.namespace_fds.user != null and jail_config.isolation.user) return error.NamespaceAttachConflict;
+    if (jail_config.security.assert_userns_disabled and (jail_config.isolation.user or jail_config.namespace_fds.user != null)) {
+        return error.AssertUserNsDisabledConflict;
+    }
 
     for (jail_config.security.cap_add) |cap| {
         if (!std.os.linux.CAP.valid(cap)) return error.InvalidCapability;
@@ -298,7 +301,11 @@ fn overlaySourceSeenBefore(actions: []const FsAction, end_exclusive: usize, key:
 
 pub fn spawn(jail_config: JailConfig, allocator: std.mem.Allocator) SpawnError!Session {
     try validate(jail_config);
-    return session_api.spawn(jail_config, allocator) catch return error.SpawnFailed;
+    return session_api.spawn(jail_config, allocator) catch |err| switch (err) {
+        error.UserNsNotDisabled => error.UserNsNotDisabled,
+        error.UserNsStateUnknown => error.UserNsStateUnknown,
+        else => error.SpawnFailed,
+    };
 }
 
 pub fn wait(session: *Session) WaitError!RunOutcome {
@@ -443,6 +450,18 @@ test "validate rejects namespace attach conflict" {
     };
 
     try std.testing.expectError(error.NamespaceAttachConflict, validate(cfg));
+}
+
+test "validate rejects assert-userns-disabled conflict" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .security = .{ .assert_userns_disabled = true },
+        .isolation = .{ .user = true },
+    };
+
+    try std.testing.expectError(error.AssertUserNsDisabledConflict, validate(cfg));
 }
 
 test "security defaults to no_new_privs" {

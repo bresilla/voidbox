@@ -35,7 +35,6 @@ pub const ValidationError = error{
     AssertUserNsDisabledConflict,
     DisableUserNsConflict,
     DisableUserNsRequiresUserNs,
-    PidNsAttachRequiresUnsharePid,
     UserNs2RequiresUserNs,
     IdentityRequiresUserNamespace,
     InvalidHostname,

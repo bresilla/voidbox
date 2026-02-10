@@ -645,7 +645,7 @@ test "validate accepts attached user namespace when unshare user disabled" {
     try validate(cfg);
 }
 
-test "validate rejects attached pid namespace when unshare pid disabled" {
+test "validate accepts attached pid namespace when unshare pid disabled" {
     const cfg: JailConfig = .{
         .name = "test",
         .rootfs_path = "/tmp/rootfs",
@@ -654,7 +654,7 @@ test "validate rejects attached pid namespace when unshare pid disabled" {
         .namespace_fds = .{ .pid = 3 },
     };
 
-    try std.testing.expectError(error.PidNsAttachRequiresUnsharePid, validate(cfg));
+    try validate(cfg);
 }
 
 test "validate accepts attached pid namespace with unshare pid" {

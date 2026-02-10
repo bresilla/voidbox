@@ -20,8 +20,12 @@ pub fn attachInitial(namespace_fds: NamespaceFds) !void {
     if (namespace_fds.ipc) |fd| {
         try attachNamespaceFd(fd, linux.CLONE.NEWIPC);
     }
-    if (namespace_fds.pid) |fd| {
-        try attachNamespaceFd(fd, linux.CLONE.NEWPID);
+}
+
+pub fn preparePidNamespace(pid_ns_fd: i32, unshare_child_pid_ns: bool) !void {
+    try attachNamespaceFd(pid_ns_fd, linux.CLONE.NEWPID);
+    if (unshare_child_pid_ns) {
+        try checkErr(linux.unshare(linux.CLONE.NEWPID), error.UnsharePidNsFailed);
     }
 }
 

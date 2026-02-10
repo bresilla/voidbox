@@ -10,6 +10,7 @@ const Net = @import("network.zig");
 const Cgroup = @import("cgroup.zig");
 const Fs = @import("fs.zig");
 const namespace = @import("namespace.zig");
+const namespace_sequence = @import("namespace_sequence.zig");
 const process_exec = @import("process_exec.zig");
 const JailConfig = @import("config.zig").JailConfig;
 const IsolationOptions = @import("config.zig").IsolationOptions;
@@ -162,6 +163,23 @@ export fn childFn(a: usize) u8 {
         _ = std.posix.read(arg.pipe[0], &buff) catch @panic("pipe read failed");
     }
 
+    if (arg.container.namespace_fds.pid) |pidns_fd| {
+        namespace_sequence.preparePidNamespace(pidns_fd, arg.container.isolation.pid) catch |e| {
+            log.err("pidns prepare failed: {}", .{e});
+            std.posix.exit(127);
+        };
+
+        const pid = std.posix.fork() catch {
+            std.posix.exit(127);
+        };
+
+        if (pid != 0) {
+            const wait_res = std.posix.waitpid(pid, 0);
+            const code = decodeWaitStatus(wait_res.status) catch 127;
+            std.posix.exit(code);
+        }
+    }
+
     if (arg.container.isolation.pid) {
         if (arg.container.runtime.as_pid_1) {
             arg.container.execCmd(arg.uid, arg.gid) catch |e| {
@@ -169,13 +187,13 @@ export fn childFn(a: usize) u8 {
                 std.posix.exit(127);
             };
             unreachable;
-        } else {
-            const code = arg.container.execAsPid1(arg.uid, arg.gid) catch |e| {
-                log.err("err: {}", .{e});
-                std.posix.exit(127);
-            };
-            std.posix.exit(code);
         }
+
+        const code = arg.container.execAsPid1(arg.uid, arg.gid) catch |e| {
+            log.err("err: {}", .{e});
+            std.posix.exit(127);
+        };
+        std.posix.exit(code);
     }
 
     arg.container.execCmd(arg.uid, arg.gid) catch |e| {

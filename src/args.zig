@@ -147,11 +147,11 @@ pub const RunArgs = struct {
             } else if (eql(arg, "--cap-drop")) {
                 idx += 1;
                 if (idx >= expanded.len) return error.MissingValue;
-                try cap_drop.append(allocator, try std.fmt.parseInt(u8, expanded[idx], 10));
+                try cap_drop.append(allocator, try parseCapability(expanded[idx]));
             } else if (eql(arg, "--cap-add")) {
                 idx += 1;
                 if (idx >= expanded.len) return error.MissingValue;
-                try cap_add.append(allocator, try std.fmt.parseInt(u8, expanded[idx], 10));
+                try cap_add.append(allocator, try parseCapability(expanded[idx]));
             } else if (eql(arg, "--json-status-fd")) {
                 idx += 1;
                 if (idx >= expanded.len) return error.MissingValue;
@@ -477,6 +477,59 @@ pub const RunArgs = struct {
         if (source_key.len == 0 or dest.len == 0) return error.InvalidRoOverlay;
         return .{ .source_key = source_key, .dest = dest };
     }
+
+    fn parseCapability(value: []const u8) !u8 {
+        const numeric = std.fmt.parseInt(u8, value, 10) catch {
+            const name = if (std.mem.startsWith(u8, value, "CAP_")) value[4..] else value;
+
+            if (std.ascii.eqlIgnoreCase(name, "CHOWN")) return std.os.linux.CAP.CHOWN;
+            if (std.ascii.eqlIgnoreCase(name, "DAC_OVERRIDE")) return std.os.linux.CAP.DAC_OVERRIDE;
+            if (std.ascii.eqlIgnoreCase(name, "DAC_READ_SEARCH")) return std.os.linux.CAP.DAC_READ_SEARCH;
+            if (std.ascii.eqlIgnoreCase(name, "FOWNER")) return std.os.linux.CAP.FOWNER;
+            if (std.ascii.eqlIgnoreCase(name, "FSETID")) return std.os.linux.CAP.FSETID;
+            if (std.ascii.eqlIgnoreCase(name, "KILL")) return std.os.linux.CAP.KILL;
+            if (std.ascii.eqlIgnoreCase(name, "SETGID")) return std.os.linux.CAP.SETGID;
+            if (std.ascii.eqlIgnoreCase(name, "SETUID")) return std.os.linux.CAP.SETUID;
+            if (std.ascii.eqlIgnoreCase(name, "SETPCAP")) return std.os.linux.CAP.SETPCAP;
+            if (std.ascii.eqlIgnoreCase(name, "LINUX_IMMUTABLE")) return std.os.linux.CAP.LINUX_IMMUTABLE;
+            if (std.ascii.eqlIgnoreCase(name, "NET_BIND_SERVICE")) return std.os.linux.CAP.NET_BIND_SERVICE;
+            if (std.ascii.eqlIgnoreCase(name, "NET_BROADCAST")) return std.os.linux.CAP.NET_BROADCAST;
+            if (std.ascii.eqlIgnoreCase(name, "NET_ADMIN")) return std.os.linux.CAP.NET_ADMIN;
+            if (std.ascii.eqlIgnoreCase(name, "NET_RAW")) return std.os.linux.CAP.NET_RAW;
+            if (std.ascii.eqlIgnoreCase(name, "IPC_LOCK")) return std.os.linux.CAP.IPC_LOCK;
+            if (std.ascii.eqlIgnoreCase(name, "IPC_OWNER")) return std.os.linux.CAP.IPC_OWNER;
+            if (std.ascii.eqlIgnoreCase(name, "SYS_MODULE")) return std.os.linux.CAP.SYS_MODULE;
+            if (std.ascii.eqlIgnoreCase(name, "SYS_RAWIO")) return std.os.linux.CAP.SYS_RAWIO;
+            if (std.ascii.eqlIgnoreCase(name, "SYS_CHROOT")) return std.os.linux.CAP.SYS_CHROOT;
+            if (std.ascii.eqlIgnoreCase(name, "SYS_PTRACE")) return std.os.linux.CAP.SYS_PTRACE;
+            if (std.ascii.eqlIgnoreCase(name, "SYS_PACCT")) return std.os.linux.CAP.SYS_PACCT;
+            if (std.ascii.eqlIgnoreCase(name, "SYS_ADMIN")) return std.os.linux.CAP.SYS_ADMIN;
+            if (std.ascii.eqlIgnoreCase(name, "SYS_BOOT")) return std.os.linux.CAP.SYS_BOOT;
+            if (std.ascii.eqlIgnoreCase(name, "SYS_NICE")) return std.os.linux.CAP.SYS_NICE;
+            if (std.ascii.eqlIgnoreCase(name, "SYS_RESOURCE")) return std.os.linux.CAP.SYS_RESOURCE;
+            if (std.ascii.eqlIgnoreCase(name, "SYS_TIME")) return std.os.linux.CAP.SYS_TIME;
+            if (std.ascii.eqlIgnoreCase(name, "SYS_TTY_CONFIG")) return std.os.linux.CAP.SYS_TTY_CONFIG;
+            if (std.ascii.eqlIgnoreCase(name, "MKNOD")) return std.os.linux.CAP.MKNOD;
+            if (std.ascii.eqlIgnoreCase(name, "LEASE")) return std.os.linux.CAP.LEASE;
+            if (std.ascii.eqlIgnoreCase(name, "AUDIT_WRITE")) return std.os.linux.CAP.AUDIT_WRITE;
+            if (std.ascii.eqlIgnoreCase(name, "AUDIT_CONTROL")) return std.os.linux.CAP.AUDIT_CONTROL;
+            if (std.ascii.eqlIgnoreCase(name, "SETFCAP")) return std.os.linux.CAP.SETFCAP;
+            if (std.ascii.eqlIgnoreCase(name, "MAC_OVERRIDE")) return std.os.linux.CAP.MAC_OVERRIDE;
+            if (std.ascii.eqlIgnoreCase(name, "MAC_ADMIN")) return std.os.linux.CAP.MAC_ADMIN;
+            if (std.ascii.eqlIgnoreCase(name, "SYSLOG")) return std.os.linux.CAP.SYSLOG;
+            if (std.ascii.eqlIgnoreCase(name, "WAKE_ALARM")) return std.os.linux.CAP.WAKE_ALARM;
+            if (std.ascii.eqlIgnoreCase(name, "BLOCK_SUSPEND")) return std.os.linux.CAP.BLOCK_SUSPEND;
+            if (std.ascii.eqlIgnoreCase(name, "AUDIT_READ")) return std.os.linux.CAP.AUDIT_READ;
+            if (std.ascii.eqlIgnoreCase(name, "PERFMON")) return std.os.linux.CAP.PERFMON;
+            if (std.ascii.eqlIgnoreCase(name, "BPF")) return std.os.linux.CAP.BPF;
+            if (std.ascii.eqlIgnoreCase(name, "CHECKPOINT_RESTORE")) return std.os.linux.CAP.CHECKPOINT_RESTORE;
+
+            return error.InvalidCapabilityName;
+        };
+
+        if (!std.os.linux.CAP.valid(numeric)) return error.InvalidCapabilityName;
+        return numeric;
+    }
 };
 
 pub const Args = union(enum) {
@@ -496,7 +549,7 @@ pub const help =
     \\  namespace attach flags: --netns-fd <fd> --mntns-fd <fd> --utsns-fd <fd> --ipcns-fd <fd> --pidns-fd <fd> --userns-fd <fd>
     \\  profile: --profile minimal|default|full_isolation
     \\  process flags: --chdir <path> --argv0 <value> --setenv KEY=VAL --unsetenv KEY --clearenv --new-session --die-with-parent
-    \\  security flags: --no-new-privs --allow-new-privs --seccomp disabled|strict --seccomp-fd <fd> --cap-drop <num> --cap-add <num>
+    \\  security flags: --no-new-privs --allow-new-privs --seccomp disabled|strict --seccomp-fd <fd> --cap-drop <num|name> --cap-add <num|name>
     \\  status flags: --json-status-fd <fd> --sync-fd <fd> --block-fd <fd> --userns-block-fd <fd> --lock-file <path>
     \\  loader flags: --args-fd <fd> (newline-separated extra args)
     \\  fs flags: --bind SRC:DEST --ro-bind SRC:DEST --proc DEST --dev DEST --tmpfs DEST[:size=N,mode=OCT] --dir PATH[:MODE] --symlink TARGET:PATH --chmod PATH:MODE --remount-ro DEST --bind-data DEST:DATA --ro-bind-data DEST:DATA --file PATH:DATA --overlay-src KEY:PATH --overlay KEY:UPPER:WORK:DEST --tmp-overlay KEY:DEST --ro-overlay KEY:DEST

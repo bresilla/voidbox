@@ -75,6 +75,8 @@ pub const ProcessOptions = struct {
 
 pub const SecurityOptions = struct {
     no_new_privs: bool = true,
+    cap_drop: []const u8 = &.{},
+    cap_add: []const u8 = &.{},
 };
 
 pub const JailConfig = struct {

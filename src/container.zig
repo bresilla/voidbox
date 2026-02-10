@@ -121,6 +121,9 @@ fn execCmd(self: *Container, uid: linux.uid_t, gid: linux.gid_t) !void {
     if (self.security.no_new_privs) {
         try checkErr(linux.prctl(@intFromEnum(linux.PR.SET_NO_NEW_PRIVS), 1, 0, 0, 0), error.NoNewPrivsFailed);
     }
+    for (self.security.cap_drop) |cap| {
+        try checkErr(linux.prctl(@intFromEnum(linux.PR.CAPBSET_DROP), cap, 0, 0, 0), error.CapabilityDropFailed);
+    }
 
     self.sethostname();
     try self.fs.setup(self.isolation.mount);

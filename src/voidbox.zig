@@ -116,6 +116,13 @@ pub fn validate(jail_config: JailConfig) !void {
         if (entry.key.len == 0) return error.InvalidSetEnvKey;
     }
 
+    if (jail_config.security.cap_add.len > 0) {
+        return error.CapabilityAddNotSupportedYet;
+    }
+    for (jail_config.security.cap_drop) |cap| {
+        if (!std.os.linux.CAP.valid(cap)) return error.InvalidCapability;
+    }
+
     for (jail_config.fs_actions) |action| {
         try validateFsAction(action);
     }
@@ -292,4 +299,26 @@ test "full_isolation enforces no_new_privs" {
 
     with_profile(&cfg, .full_isolation);
     try std.testing.expect(cfg.security.no_new_privs);
+}
+
+test "validate rejects invalid dropped capability" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .security = .{ .cap_drop = &.{255} },
+    };
+
+    try std.testing.expectError(error.InvalidCapability, validate(cfg));
+}
+
+test "validate rejects unsupported capability add" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .security = .{ .cap_add = &.{1} },
+    };
+
+    try std.testing.expectError(error.CapabilityAddNotSupportedYet, validate(cfg));
 }

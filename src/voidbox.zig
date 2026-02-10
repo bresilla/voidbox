@@ -1,6 +1,7 @@
 const std = @import("std");
 const config = @import("config.zig");
 const doctor = @import("doctor.zig");
+const errors = @import("errors.zig");
 const session_api = @import("session.zig");
 
 pub const JailConfig = config.JailConfig;
@@ -30,16 +31,21 @@ pub const FileAction = config.FileAction;
 pub const RunOutcome = config.RunOutcome;
 pub const default_shell_config = config.default_shell_config;
 pub const DoctorReport = doctor.DoctorReport;
+pub const ValidationError = errors.ValidationError;
+pub const SpawnError = errors.SpawnError;
+pub const WaitError = errors.WaitError;
+pub const LaunchError = errors.LaunchError;
+pub const DoctorError = errors.DoctorError;
 
 pub const Session = session_api.Session;
 
-pub fn launch(jail_config: JailConfig, allocator: std.mem.Allocator) !RunOutcome {
+pub fn launch(jail_config: JailConfig, allocator: std.mem.Allocator) LaunchError!RunOutcome {
     var session = try spawn(jail_config, allocator);
     defer session.deinit();
     return wait(&session);
 }
 
-pub fn launch_shell(shell_config: ShellConfig, allocator: std.mem.Allocator) !RunOutcome {
+pub fn launch_shell(shell_config: ShellConfig, allocator: std.mem.Allocator) LaunchError!RunOutcome {
     const cmd = try build_shell_cmd(shell_config, allocator);
     defer allocator.free(cmd);
 
@@ -59,8 +65,8 @@ pub fn launch_shell(shell_config: ShellConfig, allocator: std.mem.Allocator) !Ru
     return launch(jail_config, allocator);
 }
 
-pub fn check_host(allocator: std.mem.Allocator) !DoctorReport {
-    return doctor.check(allocator);
+pub fn check_host(allocator: std.mem.Allocator) DoctorError!DoctorReport {
+    return doctor.check(allocator) catch return error.DoctorFailed;
 }
 
 pub fn with_profile(jail_config: *JailConfig, profile: LaunchProfile) void {
@@ -93,7 +99,7 @@ pub fn with_profile(jail_config: *JailConfig, profile: LaunchProfile) void {
     }
 }
 
-pub fn validate(jail_config: JailConfig) !void {
+pub fn validate(jail_config: JailConfig) ValidationError!void {
     if (jail_config.name.len == 0) return error.InvalidName;
     if (jail_config.rootfs_path.len == 0) return error.InvalidRootfsPath;
     if (jail_config.cmd.len == 0) return error.MissingCommand;
@@ -283,13 +289,16 @@ fn overlaySourceSeenBefore(actions: []const FsAction, end_exclusive: usize, key:
     return false;
 }
 
-pub fn spawn(jail_config: JailConfig, allocator: std.mem.Allocator) !Session {
+pub fn spawn(jail_config: JailConfig, allocator: std.mem.Allocator) SpawnError!Session {
     try validate(jail_config);
-    return session_api.spawn(jail_config, allocator);
+    return session_api.spawn(jail_config, allocator) catch return error.SpawnFailed;
 }
 
-pub fn wait(session: *Session) !RunOutcome {
-    return session_api.wait(session);
+pub fn wait(session: *Session) WaitError!RunOutcome {
+    return session_api.wait(session) catch |err| switch (err) {
+        error.SessionAlreadyWaited => error.SessionAlreadyWaited,
+        else => error.WaitFailed,
+    };
 }
 
 fn build_shell_cmd(shell_config: ShellConfig, allocator: std.mem.Allocator) ![]const []const u8 {
@@ -733,7 +742,7 @@ test "integration smoke launch with selected namespace toggles" {
     };
 
     const outcome = launch(cfg, std.testing.allocator) catch |err| switch (err) {
-        error.AccessDenied, error.PermissionDenied => return error.SkipZigTest,
+        error.SpawnFailed => return error.SkipZigTest,
         else => return err,
     };
     try std.testing.expectEqual(@as(u8, 0), outcome.exit_code);
@@ -759,7 +768,7 @@ test "integration smoke cgroup limits application" {
     };
 
     const outcome = launch(cfg, std.testing.allocator) catch |err| switch (err) {
-        error.AccessDenied, error.PermissionDenied, error.ReadOnlyFileSystem => return error.SkipZigTest,
+        error.SpawnFailed => return error.SkipZigTest,
         else => return err,
     };
     try std.testing.expectEqual(@as(u8, 0), outcome.exit_code);

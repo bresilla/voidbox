@@ -90,6 +90,8 @@ pub const FileAction = struct {
 };
 
 pub const FsAction = union(enum) {
+    perms: u32,
+    size: usize,
     bind: MountPair,
     bind_try: MountPair,
     dev_bind: MountPair,

@@ -3,6 +3,7 @@ const linux = std.os.linux;
 const checkErr = @import("utils.zig").checkErr;
 const FsAction = @import("config.zig").FsAction;
 const OverlaySource = @import("config.zig").OverlaySource;
+const TmpfsMount = @import("config.zig").TmpfsMount;
 
 const MountedTarget = struct {
     path: []const u8,
@@ -13,12 +14,20 @@ pub fn execute(actions: []const FsAction) !void {
     defer overlay_sources.deinit(std.heap.page_allocator);
     var tmp_overlay_counter: usize = 0;
     var data_bind_counter: usize = 0;
+    var current_mode: ?u32 = null;
+    var current_size: ?usize = null;
     var mounted_targets = std.ArrayList(MountedTarget).empty;
     defer mounted_targets.deinit(std.heap.page_allocator);
     errdefer rollbackMounts(mounted_targets.items);
 
     for (actions) |action| {
         switch (action) {
+            .perms => |mode| {
+                current_mode = mode;
+            },
+            .size => |size_bytes| {
+                current_size = size_bytes;
+            },
             .bind => |mount_pair| {
                 try ensurePath(mount_pair.dest);
                 const flags = linux.MS.BIND | linux.MS.REC;
@@ -82,19 +91,22 @@ pub fn execute(actions: []const FsAction) !void {
             .tmpfs => |tmpfs| {
                 try ensurePath(tmpfs.dest);
 
+                const eff_tmpfs = effectiveTmpfs(tmpfs, current_size, current_mode);
+
                 var opts_buf: [64]u8 = undefined;
-                const opts = if (tmpfs.size_bytes != null or tmpfs.mode != null)
-                    try formatTmpfsOpts(&opts_buf, tmpfs)
+                const opts = if (eff_tmpfs.size_bytes != null or eff_tmpfs.mode != null)
+                    try formatTmpfsOpts(&opts_buf, eff_tmpfs)
                 else
                     null;
 
-                try mountPath("tmpfs", tmpfs.dest, "tmpfs", 0, opts, error.MountTmpFs);
-                try mounted_targets.append(std.heap.page_allocator, .{ .path = tmpfs.dest });
+                try mountPath("tmpfs", eff_tmpfs.dest, "tmpfs", 0, opts, error.MountTmpFs);
+                try mounted_targets.append(std.heap.page_allocator, .{ .path = eff_tmpfs.dest });
             },
             .dir => |dir_action| {
                 try ensurePath(dir_action.path);
-                if (dir_action.mode) |mode| {
-                    try std.posix.fchmodat(std.posix.AT.FDCWD, dir_action.path, @intCast(mode), 0);
+                const mode = dir_action.mode orelse current_mode;
+                if (mode) |m| {
+                    try std.posix.fchmodat(std.posix.AT.FDCWD, dir_action.path, @intCast(m), 0);
                 }
             },
             .symlink => |symlink| {
@@ -192,9 +204,20 @@ pub fn execute(actions: []const FsAction) !void {
                 var file = try std.fs.cwd().createFile(trimPath(f.path), .{ .truncate = true });
                 defer file.close();
                 try file.writeAll(f.data);
+                if (current_mode) |mode| {
+                    try std.posix.fchmodat(std.posix.AT.FDCWD, f.path, @intCast(mode), 0);
+                }
             },
         }
     }
+}
+
+fn effectiveTmpfs(tmpfs: TmpfsMount, size_fallback: ?usize, mode_fallback: ?u32) TmpfsMount {
+    return .{
+        .dest = tmpfs.dest,
+        .size_bytes = tmpfs.size_bytes orelse size_fallback,
+        .mode = tmpfs.mode orelse mode_fallback,
+    };
 }
 
 fn rollbackMounts(mounted_targets: []const MountedTarget) void {
@@ -308,4 +331,14 @@ test "findOverlaySource resolves source by key" {
 test "sourceExists handles existing and missing paths" {
     try std.testing.expect(sourceExists("/"));
     try std.testing.expect(!sourceExists("/definitely/not/a/real/path"));
+}
+
+test "effectiveTmpfs applies size and mode modifiers" {
+    const resolved = effectiveTmpfs(.{ .dest = "/tmp" }, 2048, 0o755);
+    try std.testing.expectEqual(@as(?usize, 2048), resolved.size_bytes);
+    try std.testing.expectEqual(@as(?u32, 0o755), resolved.mode);
+
+    const explicit = effectiveTmpfs(.{ .dest = "/tmp", .size_bytes = 4096, .mode = 0o700 }, 2048, 0o755);
+    try std.testing.expectEqual(@as(?usize, 4096), explicit.size_bytes);
+    try std.testing.expectEqual(@as(?u32, 0o700), explicit.mode);
 }

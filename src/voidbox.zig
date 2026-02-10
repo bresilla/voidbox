@@ -194,6 +194,12 @@ pub fn validate(jail_config: JailConfig) ValidationError!void {
 
 fn validateFsAction(action: FsAction) !void {
     switch (action) {
+        .perms => |mode| {
+            if (mode > 0o7777) return error.InvalidFsMode;
+        },
+        .size => |val| {
+            if (val == 0) return error.InvalidFsSize;
+        },
         .bind => |pair| {
             if (pair.src.len == 0) return error.InvalidFsSource;
             if (pair.dest.len == 0) return error.InvalidFsDestination;
@@ -407,6 +413,17 @@ test "validate rejects malformed try-bind fs action" {
     };
 
     try std.testing.expectError(error.InvalidFsSource, validate(cfg));
+}
+
+test "validate rejects invalid fs size modifier" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .fs_actions = &.{.{ .size = 0 }},
+    };
+
+    try std.testing.expectError(error.InvalidFsSize, validate(cfg));
 }
 
 test "full_isolation profile validates with fs actions" {

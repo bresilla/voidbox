@@ -26,6 +26,7 @@ pub const ValidationError = error{
     InvalidFsSource,
     InvalidFsDestination,
     InvalidFsMode,
+    InvalidFsSize,
     InvalidOverlaySourceKey,
     InvalidOverlayPath,
     DuplicateOverlaySourceKey,

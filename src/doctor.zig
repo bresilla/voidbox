@@ -30,6 +30,8 @@ pub const DoctorReport = struct {
     nft_available: bool,
     unpriv_userns_clone_enabled: ?bool,
     capabilities: CapabilityMatrix,
+    readiness_score: u8,
+    full_isolation_ready: bool,
 
     pub fn print(self: DoctorReport, writer: anytype) !void {
         try writer.print("voidbox doctor\n", .{});
@@ -56,6 +58,21 @@ pub const DoctorReport = struct {
             self.capabilities.tmpfs,
             self.capabilities.devtmpfs,
         });
+        try writer.print("- readiness score: {}/100\n", .{self.readiness_score});
+        try writer.print("- full isolation ready: {}\n", .{self.full_isolation_ready});
+
+        if (!self.cgroup_v2_available) {
+            try writer.print("  recommendation: enable cgroup v2 for resource controls\n", .{});
+        }
+        if (!self.capabilities.seccomp_filter) {
+            try writer.print("  recommendation: kernel seccomp filter support missing\n", .{});
+        }
+        if (!self.capabilities.overlayfs) {
+            try writer.print("  recommendation: overlayfs unavailable; overlay actions disabled\n", .{});
+        }
+        if (!self.iptables_available and !self.nft_available) {
+            try writer.print("  recommendation: install iptables or nft for bridge NAT\n", .{});
+        }
     }
 };
 
@@ -69,29 +86,95 @@ pub fn check(allocator: std.mem.Allocator) !DoctorReport {
     const tmpfs = if (filesystems) |v| containsToken(v, "tmpfs") else false;
     const devtmpfs = if (filesystems) |v| containsToken(v, "devtmpfs") else false;
 
-    return .{
+    const has_user = ns_exists("/proc/self/ns/user");
+    const has_mount = ns_exists("/proc/self/ns/mnt");
+    const has_pid = ns_exists("/proc/self/ns/pid");
+    const has_net = ns_exists("/proc/self/ns/net");
+    const has_uts = ns_exists("/proc/self/ns/uts");
+    const has_ipc = ns_exists("/proc/self/ns/ipc");
+    const has_seccomp_filter = file_exists("/proc/sys/kernel/seccomp/actions_avail");
+    const has_iptables = command_exists("iptables");
+    const has_nft = command_exists("nft");
+
+    const full_isolation_ready = has_user and has_mount and has_pid and has_net and has_uts and has_ipc and cgroup_v2 and has_seccomp_filter and tmpfs and procfs;
+    const readiness = computeReadinessScore(.{
         .is_linux = true,
-        .kernel_version = try readKernelVersion(allocator),
-        .has_user_ns = ns_exists("/proc/self/ns/user"),
-        .has_mount_ns = ns_exists("/proc/self/ns/mnt"),
-        .has_pid_ns = ns_exists("/proc/self/ns/pid"),
-        .has_net_ns = ns_exists("/proc/self/ns/net"),
-        .has_uts_ns = ns_exists("/proc/self/ns/uts"),
-        .has_ipc_ns = ns_exists("/proc/self/ns/ipc"),
+        .has_user_ns = has_user,
+        .has_mount_ns = has_mount,
+        .has_pid_ns = has_pid,
+        .has_net_ns = has_net,
+        .has_uts_ns = has_uts,
+        .has_ipc_ns = has_ipc,
         .cgroup_v2_available = cgroup_v2,
-        .iptables_available = command_exists("iptables"),
-        .nft_available = command_exists("nft"),
-        .unpriv_userns_clone_enabled = read_unpriv_userns_clone(),
+        .iptables_available = has_iptables,
+        .nft_available = has_nft,
         .capabilities = .{
             .overlayfs = overlayfs,
-            .seccomp_filter = file_exists("/proc/sys/kernel/seccomp/actions_avail"),
-            .namespace_attach = ns_exists("/proc/self/ns/mnt") and ns_exists("/proc/self/ns/net"),
+            .seccomp_filter = has_seccomp_filter,
+            .namespace_attach = has_mount and has_net,
             .userns_mapping = file_exists("/proc/self/uid_map") and file_exists("/proc/self/gid_map"),
             .procfs = procfs,
             .tmpfs = tmpfs,
             .devtmpfs = devtmpfs,
         },
+    });
+
+    return .{
+        .is_linux = true,
+        .kernel_version = try readKernelVersion(allocator),
+        .has_user_ns = has_user,
+        .has_mount_ns = has_mount,
+        .has_pid_ns = has_pid,
+        .has_net_ns = has_net,
+        .has_uts_ns = has_uts,
+        .has_ipc_ns = has_ipc,
+        .cgroup_v2_available = cgroup_v2,
+        .iptables_available = has_iptables,
+        .nft_available = has_nft,
+        .unpriv_userns_clone_enabled = read_unpriv_userns_clone(),
+        .capabilities = .{
+            .overlayfs = overlayfs,
+            .seccomp_filter = has_seccomp_filter,
+            .namespace_attach = has_mount and has_net,
+            .userns_mapping = file_exists("/proc/self/uid_map") and file_exists("/proc/self/gid_map"),
+            .procfs = procfs,
+            .tmpfs = tmpfs,
+            .devtmpfs = devtmpfs,
+        },
+        .readiness_score = readiness,
+        .full_isolation_ready = full_isolation_ready,
     };
+}
+
+fn computeReadinessScore(report: struct {
+    is_linux: bool,
+    has_user_ns: bool,
+    has_mount_ns: bool,
+    has_pid_ns: bool,
+    has_net_ns: bool,
+    has_uts_ns: bool,
+    has_ipc_ns: bool,
+    cgroup_v2_available: bool,
+    iptables_available: bool,
+    nft_available: bool,
+    capabilities: CapabilityMatrix,
+}) u8 {
+    var score: u8 = 0;
+    if (report.is_linux) score += 10;
+    if (report.has_user_ns) score += 10;
+    if (report.has_mount_ns) score += 10;
+    if (report.has_pid_ns) score += 5;
+    if (report.has_net_ns) score += 5;
+    if (report.has_uts_ns) score += 5;
+    if (report.has_ipc_ns) score += 5;
+    if (report.cgroup_v2_available) score += 10;
+    if (report.capabilities.seccomp_filter) score += 10;
+    if (report.capabilities.overlayfs) score += 10;
+    if (report.capabilities.procfs) score += 5;
+    if (report.capabilities.tmpfs) score += 5;
+    if (report.capabilities.devtmpfs) score += 5;
+    if (report.iptables_available or report.nft_available) score += 5;
+    return score;
 }
 
 fn ns_exists(path: []const u8) bool {

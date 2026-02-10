@@ -12,13 +12,20 @@ pub const RunOutcome = config.RunOutcome;
 pub const default_shell_config = config.default_shell_config;
 pub const DoctorReport = doctor.DoctorReport;
 
-pub fn launch(jail_config: JailConfig, allocator: std.mem.Allocator) !RunOutcome {
-    try runtime.init();
-    var container = try Container.init(jail_config, allocator);
-    defer container.deinit();
+pub const Session = struct {
+    container: Container,
+    pid: std.posix.pid_t,
+    waited: bool = false,
 
-    const pid = try container.run();
-    return .{ .pid = pid, .exit_code = 0 };
+    pub fn deinit(self: *Session) void {
+        self.container.deinit();
+    }
+};
+
+pub fn launch(jail_config: JailConfig, allocator: std.mem.Allocator) !RunOutcome {
+    var session = try spawn(jail_config, allocator);
+    defer session.deinit();
+    return wait(&session);
 }
 
 pub fn launch_shell(shell_config: ShellConfig, allocator: std.mem.Allocator) !RunOutcome {
@@ -38,6 +45,25 @@ pub fn launch_shell(shell_config: ShellConfig, allocator: std.mem.Allocator) !Ru
 
 pub fn check_host(allocator: std.mem.Allocator) !DoctorReport {
     return doctor.check(allocator);
+}
+
+pub fn spawn(jail_config: JailConfig, allocator: std.mem.Allocator) !Session {
+    try runtime.init();
+    var container = try Container.init(jail_config, allocator);
+    const pid = try container.spawn();
+
+    return .{
+        .container = container,
+        .pid = pid,
+    };
+}
+
+pub fn wait(session: *Session) !RunOutcome {
+    if (session.waited) return error.SessionAlreadyWaited;
+
+    try session.container.wait(session.pid);
+    session.waited = true;
+    return .{ .pid = session.pid, .exit_code = 0 };
 }
 
 fn build_shell_cmd(shell_config: ShellConfig, allocator: std.mem.Allocator) ![]const []const u8 {

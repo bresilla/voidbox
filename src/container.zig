@@ -52,6 +52,12 @@ fn sethostname(self: *Container) void {
 }
 
 pub fn run(self: *Container) !linux.pid_t {
+    const pid = try self.spawn();
+    try self.wait(pid);
+    return pid;
+}
+
+pub fn spawn(self: *Container) !linux.pid_t {
     // setup network virtual interfaces and namespace
     try self.initNetwork();
 
@@ -83,12 +89,15 @@ pub fn run(self: *Container) !linux.pid_t {
     const buff = [_]u8{0};
     _ = try std.posix.write(childp_args.pipe[1], &buff);
 
-    const wait_res = std.posix.waitpid(@intCast(pid), 0);
+    return @intCast(pid);
+}
+
+pub fn wait(self: *Container, pid: linux.pid_t) !void {
+    _ = self;
+    const wait_res = std.posix.waitpid(pid, 0);
     if (wait_res.status != 0) {
         return error.CmdFailed;
     }
-
-    return @intCast(pid);
 }
 
 // initializes the container environment

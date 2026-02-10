@@ -123,7 +123,7 @@ pub fn wait(self: *Container, pid: linux.pid_t) !void {
 // initializes the container environment
 // and executes the user passed cmd
 fn execCmd(self: *Container, uid: linux.uid_t, gid: linux.gid_t) !void {
-    try process_exec.prepare(self.allocator, uid, gid, self.process, self.security, self.namespace_fds);
+    try process_exec.prepare(self.allocator, uid, gid, self.isolation, self.process, self.security, self.namespace_fds);
 
     self.sethostname();
     try self.fs.setup(self.isolation.mount);
@@ -137,6 +137,8 @@ fn execCmd(self: *Container, uid: linux.uid_t, gid: linux.gid_t) !void {
             try net.setupContainerVethIf();
         }
     }
+
+    try process_exec.finalizeNamespaces(self.namespace_fds);
 
     try process_exec.exec(self.allocator, self.cmd, self.process);
 }

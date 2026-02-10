@@ -18,6 +18,7 @@ pub const IsolationOptions = struct {
 
 pub const NamespaceFds = struct {
     user: ?i32 = null,
+    user2: ?i32 = null,
     pid: ?i32 = null,
     net: ?i32 = null,
     mount: ?i32 = null,

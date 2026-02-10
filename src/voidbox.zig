@@ -190,6 +190,7 @@ pub fn validate(jail_config: JailConfig) ValidationError!void {
     }
 
     if (jail_config.namespace_fds.user) |fd| if (fd < 0) return error.InvalidNamespaceFd;
+    if (jail_config.namespace_fds.user2) |fd| if (fd < 0) return error.InvalidNamespaceFd;
     if (jail_config.namespace_fds.pid) |fd| if (fd < 0) return error.InvalidNamespaceFd;
     if (jail_config.namespace_fds.net) |fd| if (fd < 0) return error.InvalidNamespaceFd;
     if (jail_config.namespace_fds.mount) |fd| if (fd < 0) return error.InvalidNamespaceFd;
@@ -517,6 +518,17 @@ test "validate rejects invalid namespace fd" {
         .rootfs_path = "/tmp/rootfs",
         .cmd = &.{"/bin/sh"},
         .namespace_fds = .{ .net = -1 },
+    };
+
+    try std.testing.expectError(error.InvalidNamespaceFd, validate(cfg));
+}
+
+test "validate rejects invalid userns2 fd" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .namespace_fds = .{ .user2 = -1 },
     };
 
     try std.testing.expectError(error.InvalidNamespaceFd, validate(cfg));

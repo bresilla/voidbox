@@ -34,6 +34,7 @@ pub const ValidationError = error{
     AssertUserNsDisabledConflict,
     DisableUserNsConflict,
     PidNsAttachRequiresUnsharePid,
+    UserNs2RequiresUserNs,
 };
 
 pub const SpawnError = ValidationError || error{

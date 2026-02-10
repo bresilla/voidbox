@@ -737,3 +737,33 @@ test "waitForFd consumes supervisor unblock byte" {
     _ = try std.posix.write(pipefds[1], &one);
     try waitForFd(pipefds[0]);
 }
+
+test "public API compile-time surface" {
+    comptime {
+        const api = @This();
+
+        std.debug.assert(@hasDecl(api, "JailConfig"));
+        std.debug.assert(@hasDecl(api, "ShellConfig"));
+        std.debug.assert(@hasDecl(api, "Session"));
+        std.debug.assert(@hasDecl(api, "RunOutcome"));
+        std.debug.assert(@hasDecl(api, "DoctorReport"));
+
+        std.debug.assert(@hasDecl(api, "launch"));
+        std.debug.assert(@hasDecl(api, "spawn"));
+        std.debug.assert(@hasDecl(api, "wait"));
+        std.debug.assert(@hasDecl(api, "launch_shell"));
+        std.debug.assert(@hasDecl(api, "check_host"));
+        std.debug.assert(@hasDecl(api, "with_profile"));
+        std.debug.assert(@hasDecl(api, "validate"));
+        std.debug.assert(@hasDecl(api, "default_shell_config"));
+
+        _ = @as(fn (JailConfig, std.mem.Allocator) anyerror!RunOutcome, launch);
+        _ = @as(fn (JailConfig, std.mem.Allocator) anyerror!Session, spawn);
+        _ = @as(fn (*Session) anyerror!RunOutcome, wait);
+        _ = @as(fn (ShellConfig, std.mem.Allocator) anyerror!RunOutcome, launch_shell);
+        _ = @as(fn (std.mem.Allocator) anyerror!DoctorReport, check_host);
+        _ = @as(fn (*JailConfig, LaunchProfile) void, with_profile);
+        _ = @as(fn (JailConfig) anyerror!void, validate);
+        _ = @as(fn ([]const u8) ShellConfig, default_shell_config);
+    }
+}

@@ -716,6 +716,55 @@ test "integration smoke launch with net disabled" {
     try std.testing.expectEqual(@as(u8, 0), outcome.exit_code);
 }
 
+test "integration smoke launch with selected namespace toggles" {
+    if (!integrationTestsEnabled()) return error.SkipZigTest;
+
+    const cfg: JailConfig = .{
+        .name = "itest-toggles",
+        .rootfs_path = "/",
+        .cmd = &.{ "/bin/sh", "-c", "exit 0" },
+        .isolation = .{
+            .net = false,
+            .mount = false,
+            .pid = true,
+            .uts = true,
+            .ipc = false,
+        },
+    };
+
+    const outcome = launch(cfg, std.testing.allocator) catch |err| switch (err) {
+        error.AccessDenied, error.PermissionDenied => return error.SkipZigTest,
+        else => return err,
+    };
+    try std.testing.expectEqual(@as(u8, 0), outcome.exit_code);
+}
+
+test "integration smoke cgroup limits application" {
+    if (!integrationTestsEnabled()) return error.SkipZigTest;
+
+    const cfg: JailConfig = .{
+        .name = "itest-cgroup",
+        .rootfs_path = "/",
+        .cmd = &.{ "/bin/sh", "-c", "exit 0" },
+        .resources = .{
+            .pids = "32",
+        },
+        .isolation = .{
+            .net = false,
+            .mount = false,
+            .pid = false,
+            .uts = false,
+            .ipc = false,
+        },
+    };
+
+    const outcome = launch(cfg, std.testing.allocator) catch |err| switch (err) {
+        error.AccessDenied, error.PermissionDenied, error.ReadOnlyFileSystem => return error.SkipZigTest,
+        else => return err,
+    };
+    try std.testing.expectEqual(@as(u8, 0), outcome.exit_code);
+}
+
 fn integrationTestsEnabled() bool {
     const value = std.process.getEnvVarOwned(std.heap.page_allocator, "VOIDBOX_RUN_INTEGRATION") catch return false;
     defer std.heap.page_allocator.free(value);

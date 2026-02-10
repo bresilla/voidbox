@@ -49,6 +49,10 @@ pub fn main() !void {
             } else {
                 try report.print(stdout);
             }
+
+            if (d.strict and !report.strictReady()) {
+                return error.DoctorStrictFailed;
+            }
         },
     }
 }

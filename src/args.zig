@@ -541,12 +541,15 @@ pub const Args = union(enum) {
 
 pub const DoctorArgs = struct {
     json: bool = false,
+    strict: bool = false,
 
     fn parse(_: std.mem.Allocator, args: *std.process.ArgIterator) !DoctorArgs {
         var out = DoctorArgs{};
         while (args.next()) |arg| {
             if (eql(arg, "--json")) {
                 out.json = true;
+            } else if (eql(arg, "--strict")) {
+                out.strict = true;
             } else {
                 return error.InvalidOption;
             }
@@ -571,7 +574,7 @@ pub const help =
     \\  fs flags: --bind SRC:DEST --ro-bind SRC:DEST --proc DEST --dev DEST --tmpfs DEST[:size=N,mode=OCT] --dir PATH[:MODE] --symlink TARGET:PATH --chmod PATH:MODE --remount-ro DEST --bind-data DEST:DATA --ro-bind-data DEST:DATA --file PATH:DATA --overlay-src KEY:PATH --overlay KEY:UPPER:WORK:DEST --tmp-overlay KEY:DEST --ro-overlay KEY:DEST
     \\  default command when omitted: /bin/sh
     \\ps
-    \\doctor [--json]
+    \\doctor [--json] [--strict]
     \\help
     \\
 ;

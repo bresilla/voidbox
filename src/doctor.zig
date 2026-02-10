@@ -33,6 +33,10 @@ pub const DoctorReport = struct {
     readiness_score: u8,
     full_isolation_ready: bool,
 
+    pub fn strictReady(self: DoctorReport) bool {
+        return self.full_isolation_ready;
+    }
+
     pub fn print(self: DoctorReport, writer: anytype) !void {
         try writer.print("voidbox doctor\n", .{});
         try writer.print("- linux: {}\n", .{self.is_linux});
@@ -101,6 +105,7 @@ pub const DoctorReport = struct {
         });
         try writer.print(",\"readiness_score\":{}", .{self.readiness_score});
         try writer.print(",\"full_isolation_ready\":{}", .{self.full_isolation_ready});
+        try writer.print(",\"strict_ready\":{}", .{self.strictReady()});
         try writer.print("}}\n", .{});
     }
 };

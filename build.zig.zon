@@ -1,12 +1,6 @@
 .{
     .name = .voidbox,
     .version = "0.0.1",
-    .dependencies = .{
-        .argonaut = .{
-            .url = "https://codeberg.org/OhMyDitzzy/argonaut/archive/master.tar.gz",
-            .hash = "argonaut-0.0.1-BgmCpIt6AQCUnRrUtsAg1AuaeuSE1tr7tlWpjXbDulXi",
-        },
-    },
     .paths = .{
         "build.zig",
         "build.zig.zon",

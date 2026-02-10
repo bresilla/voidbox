@@ -18,7 +18,6 @@ pub fn build(b: *std.Build) !void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
-    const argonaut_dep = b.dependency("argonaut", .{ .target = target, .optimize = optimize });
 
     const voidbox_module = b.createModule(.{
         .root_source_file = b.path("src/voidbox.zig"),
@@ -87,7 +86,6 @@ pub fn build(b: *std.Build) !void {
         .link_libc = true,
     });
     vb_module.addImport("voidbox", voidbox_module);
-    vb_module.addImport("argonaut", argonaut_dep.module("argonaut"));
 
     const vb = b.addExecutable(.{
         .name = "vb",

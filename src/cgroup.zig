@@ -19,15 +19,21 @@ const Resource = enum {
 cid: []const u8,
 options: ResourceArgs,
 allocator: std.mem.Allocator,
+enabled: bool,
 
 const Cgroup = @This();
 
 pub fn init(cid: []const u8, options: ResourceArgs, allocator: std.mem.Allocator) !Cgroup {
+    const enabled = options.mem != null or options.cpu != null or options.pids != null;
     var cgroups = Cgroup{
         .cid = cid,
         .options = options,
         .allocator = allocator,
+        .enabled = enabled,
     };
+
+    if (!enabled) return cgroups;
+
     try cgroups.initDirs();
     try cgroups.applyResourceLimits();
     return cgroups;
@@ -62,6 +68,8 @@ pub fn setResourceMax(self: *Cgroup, resource: Resource, limit: []const u8) !voi
 }
 
 pub fn enterCgroup(self: *Cgroup, pid: linux.pid_t) !void {
+    if (!self.enabled) return;
+
     const cgroup_path = try std.mem.concat(self.allocator, u8, &.{ utils.CGROUP_PATH, "voidbox/", self.cid, "/cgroup.procs" });
     defer self.allocator.free(cgroup_path);
     const file = try std.fs.openFileAbsolute(cgroup_path, .{ .mode = .write_only });
@@ -72,6 +80,8 @@ pub fn enterCgroup(self: *Cgroup, pid: linux.pid_t) !void {
 }
 
 pub fn deinit(self: *Cgroup) !void {
+    if (!self.enabled) return;
+
     const path = try std.mem.concat(self.allocator, u8, &.{ utils.CGROUP_PATH ++ "voidbox/", self.cid });
     defer self.allocator.free(path);
     try std.fs.deleteDirAbsolute(path);

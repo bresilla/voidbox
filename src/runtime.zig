@@ -2,15 +2,16 @@ const std = @import("std");
 const utils = @import("utils.zig");
 
 pub fn init() !void {
-    _ = try utils.createDirIfNotExists("/var/run/voidbox");
-    _ = try utils.createDirIfNotExists("/var/run/voidbox/containers");
-    _ = try utils.createDirIfNotExists("/var/run/voidbox/containers/netns");
+    _ = utils.createDirIfNotExists("/var/run/voidbox") catch false;
+    _ = utils.createDirIfNotExists("/var/run/voidbox/containers") catch false;
+    _ = utils.createDirIfNotExists("/var/run/voidbox/containers/netns") catch false;
 
     const path = utils.CGROUP_PATH ++ "voidbox/";
-    if (!try utils.createDirIfNotExists(path)) return;
+    const cgroup_ready = utils.createDirIfNotExists(path) catch false;
+    if (!cgroup_ready) return;
 
     const root_cgroup = path ++ "cgroup.subtree_control";
-    var root_cgroup_file = try std.fs.openFileAbsolute(root_cgroup, .{ .mode = .write_only });
+    var root_cgroup_file = std.fs.openFileAbsolute(root_cgroup, .{ .mode = .write_only }) catch return;
     defer root_cgroup_file.close();
-    _ = try root_cgroup_file.write("+cpu +memory +pids");
+    _ = root_cgroup_file.write("+cpu +memory +pids") catch 0;
 }

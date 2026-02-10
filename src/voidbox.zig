@@ -2,6 +2,7 @@ const std = @import("std");
 const config = @import("config.zig");
 const doctor = @import("doctor.zig");
 const errors = @import("errors.zig");
+const namespace_semantics = @import("namespace_semantics.zig");
 const session_api = @import("session.zig");
 
 pub const JailConfig = config.JailConfig;
@@ -153,15 +154,7 @@ pub fn validate(jail_config: JailConfig) ValidationError!void {
     if (jail_config.namespace_fds.uts) |fd| if (fd < 0) return error.InvalidNamespaceFd;
     if (jail_config.namespace_fds.ipc) |fd| if (fd < 0) return error.InvalidNamespaceFd;
 
-    if (jail_config.namespace_fds.net != null and jail_config.isolation.net) return error.NamespaceAttachConflict;
-    if (jail_config.namespace_fds.mount != null and jail_config.isolation.mount) return error.NamespaceAttachConflict;
-    if (jail_config.namespace_fds.uts != null and jail_config.isolation.uts) return error.NamespaceAttachConflict;
-    if (jail_config.namespace_fds.ipc != null and jail_config.isolation.ipc) return error.NamespaceAttachConflict;
-    if (jail_config.namespace_fds.pid != null and jail_config.isolation.pid) return error.NamespaceAttachConflict;
-    if (jail_config.namespace_fds.user != null and jail_config.isolation.user) return error.NamespaceAttachConflict;
-    if (jail_config.security.assert_userns_disabled and (jail_config.isolation.user or jail_config.namespace_fds.user != null)) {
-        return error.AssertUserNsDisabledConflict;
-    }
+    try namespace_semantics.validate(jail_config.isolation, jail_config.namespace_fds, jail_config.security);
 
     for (jail_config.security.cap_add) |cap| {
         if (!std.os.linux.CAP.valid(cap)) return error.InvalidCapability;
@@ -326,7 +319,7 @@ fn overlaySourceSeenBefore(actions: []const FsAction, end_exclusive: usize, key:
 
 pub fn spawn(jail_config: JailConfig, allocator: std.mem.Allocator) SpawnError!Session {
     try validate(jail_config);
-    return session_api.spawn(jail_config, allocator) catch |err| switch (err) {
+    return session_api.spawn(namespace_semantics.normalized(jail_config), allocator) catch |err| switch (err) {
         error.UserNsNotDisabled => error.UserNsNotDisabled,
         error.UserNsStateUnknown => error.UserNsStateUnknown,
         else => error.SpawnFailed,

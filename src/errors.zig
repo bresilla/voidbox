@@ -32,6 +32,7 @@ pub const ValidationError = error{
     DuplicateOverlaySourceKey,
     MissingOverlaySource,
     AssertUserNsDisabledConflict,
+    DisableUserNsConflict,
 };
 
 pub const SpawnError = ValidationError || error{

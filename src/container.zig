@@ -7,8 +7,7 @@ const Net = @import("network.zig");
 const Cgroup = @import("cgroup.zig");
 const Fs = @import("fs.zig");
 const namespace = @import("namespace.zig");
-const caps = @import("caps.zig");
-const seccomp = @import("seccomp.zig");
+const process_exec = @import("process_exec.zig");
 const JailConfig = @import("config.zig").JailConfig;
 const IsolationOptions = @import("config.zig").IsolationOptions;
 const NamespaceFds = @import("config.zig").NamespaceFds;
@@ -124,22 +123,7 @@ pub fn wait(self: *Container, pid: linux.pid_t) !void {
 // initializes the container environment
 // and executes the user passed cmd
 fn execCmd(self: *Container, uid: linux.uid_t, gid: linux.gid_t) !void {
-    try checkErr(linux.setreuid(uid, uid), error.UID);
-    try checkErr(linux.setregid(gid, gid), error.GID);
-
-    try namespace.attach(self.namespace_fds);
-
-    if (self.process.new_session and !std.posix.isatty(std.posix.STDIN_FILENO)) {
-        _ = std.posix.setsid() catch return error.SetSidFailed;
-    }
-    if (self.process.die_with_parent) {
-        try checkErr(linux.prctl(@intFromEnum(linux.PR.SET_PDEATHSIG), @as(usize, @intCast(c.SIGKILL)), 0, 0, 0), error.PrctlFailed);
-    }
-    if (self.security.no_new_privs) {
-        try checkErr(linux.prctl(@intFromEnum(linux.PR.SET_NO_NEW_PRIVS), 1, 0, 0, 0), error.NoNewPrivsFailed);
-    }
-    try caps.apply(self.security);
-    try seccomp.apply(self.security, self.allocator);
+    try process_exec.prepare(self.allocator, uid, gid, self.process, self.security, self.namespace_fds);
 
     self.sethostname();
     try self.fs.setup(self.isolation.mount);
@@ -154,31 +138,7 @@ fn execCmd(self: *Container, uid: linux.uid_t, gid: linux.gid_t) !void {
         }
     }
 
-    var exec_cmd = self.cmd;
-    var owns_exec_cmd = false;
-    if (self.process.argv0) |argv0| {
-        const cmd_copy = try self.allocator.alloc([]const u8, self.cmd.len);
-        @memcpy(cmd_copy, self.cmd);
-        cmd_copy[0] = argv0;
-        exec_cmd = cmd_copy;
-        owns_exec_cmd = true;
-    }
-    defer if (owns_exec_cmd) self.allocator.free(exec_cmd);
-
-    var env_map = if (self.process.clear_env)
-        std.process.EnvMap.init(self.allocator)
-    else
-        try std.process.getEnvMap(self.allocator);
-    defer env_map.deinit();
-
-    for (self.process.unset_env) |key| {
-        env_map.remove(key);
-    }
-    for (self.process.set_env) |entry| {
-        try env_map.put(entry.key, entry.value);
-    }
-
-    std.process.execve(self.allocator, exec_cmd, &env_map) catch return error.CmdFailed;
+    try process_exec.exec(self.allocator, self.cmd, self.process);
 }
 
 fn waitForFd(fd: i32) !void {

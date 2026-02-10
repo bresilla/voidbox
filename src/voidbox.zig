@@ -124,10 +124,7 @@ pub fn validate(jail_config: JailConfig) !void {
     for (jail_config.security.cap_drop) |cap| {
         if (!std.os.linux.CAP.valid(cap)) return error.InvalidCapability;
     }
-    if (jail_config.security.seccomp_filter_fds.len > 0) {
-        return error.SeccompFilterFdsNotSupportedYet;
-    }
-    const has_filters = jail_config.security.seccomp_filter != null or jail_config.security.seccomp_filters.len > 0;
+    const has_filters = jail_config.security.seccomp_filter != null or jail_config.security.seccomp_filters.len > 0 or jail_config.security.seccomp_filter_fds.len > 0;
     if (jail_config.security.seccomp_mode == .strict and has_filters) {
         return error.SeccompModeConflict;
     }
@@ -136,6 +133,9 @@ pub fn validate(jail_config: JailConfig) !void {
     }
     for (jail_config.security.seccomp_filters) |filter| {
         if (filter.len == 0) return error.InvalidSeccompFilter;
+    }
+    for (jail_config.security.seccomp_filter_fds) |fd| {
+        if (fd < 0) return error.InvalidSeccompFilterFd;
     }
     if ((jail_config.security.seccomp_mode == .strict or has_filters) and !jail_config.security.no_new_privs) {
         return error.SeccompRequiresNoNewPrivs;
@@ -355,15 +355,15 @@ test "validate accepts capability add and drop values" {
     try validate(cfg);
 }
 
-test "validate rejects seccomp filter fds for now" {
+test "validate rejects invalid seccomp filter fd" {
     const cfg: JailConfig = .{
         .name = "test",
         .rootfs_path = "/tmp/rootfs",
         .cmd = &.{"/bin/sh"},
-        .security = .{ .seccomp_filter_fds = &.{3} },
+        .security = .{ .seccomp_filter_fds = &.{-1} },
     };
 
-    try std.testing.expectError(error.SeccompFilterFdsNotSupportedYet, validate(cfg));
+    try std.testing.expectError(error.InvalidSeccompFilterFd, validate(cfg));
 }
 
 test "validate requires no_new_privs for seccomp strict" {
@@ -448,6 +448,17 @@ test "validate accepts stacked seccomp filters" {
         .rootfs_path = "/tmp/rootfs",
         .cmd = &.{"/bin/sh"},
         .security = .{ .seccomp_filters = &stacked },
+    };
+
+    try validate(cfg);
+}
+
+test "validate accepts seccomp filter fds" {
+    const cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .security = .{ .seccomp_filter_fds = &.{3} },
     };
 
     try validate(cfg);

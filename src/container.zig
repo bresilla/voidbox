@@ -215,6 +215,9 @@ fn applySeccomp(self: *Container) !void {
     for (self.security.seccomp_filters) |filter| {
         try applySeccompFilter(filter);
     }
+    for (self.security.seccomp_filter_fds) |fd| {
+        try self.applySeccompFilterFd(fd);
+    }
 }
 
 fn applySeccompFilter(filter: []const SeccompInstruction) !void {
@@ -223,6 +226,23 @@ fn applySeccompFilter(filter: []const SeccompInstruction) !void {
         .filter = @constCast(filter.ptr),
     };
     try checkErr(linux.seccomp(SECCOMP_SET_MODE_FILTER, 0, @ptrCast(&prog)), error.SeccompFailed);
+}
+
+fn applySeccompFilterFd(self: *Container, fd: i32) !void {
+    var file = std.fs.File{ .handle = fd };
+    const raw = try file.readToEndAlloc(self.allocator, 1024 * 1024);
+    defer self.allocator.free(raw);
+
+    if (raw.len == 0 or raw.len % @sizeOf(SeccompInstruction) != 0) {
+        return error.InvalidSeccompFdProgram;
+    }
+
+    const count = raw.len / @sizeOf(SeccompInstruction);
+    const filter = try self.allocator.alloc(SeccompInstruction, count);
+    defer self.allocator.free(filter);
+
+    @memcpy(std.mem.sliceAsBytes(filter), raw);
+    try applySeccompFilter(filter);
 }
 
 export fn childFn(a: usize) u8 {

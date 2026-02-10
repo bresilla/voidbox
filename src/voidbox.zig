@@ -241,3 +241,30 @@ test "validate rejects malformed fs action" {
 
     try std.testing.expectError(error.InvalidFsSource, validate(cfg));
 }
+
+test "full_isolation profile validates with fs actions" {
+    var cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .fs_actions = &.{
+            .{ .proc = "/proc" },
+            .{ .tmpfs = .{ .dest = "/tmp", .mode = 0o1777 } },
+        },
+    };
+
+    with_profile(&cfg, .full_isolation);
+    try validate(cfg);
+}
+
+test "minimal profile rejects mount actions" {
+    var cfg: JailConfig = .{
+        .name = "test",
+        .rootfs_path = "/tmp/rootfs",
+        .cmd = &.{"/bin/sh"},
+        .fs_actions = &.{.{ .proc = "/proc" }},
+    };
+
+    with_profile(&cfg, .minimal);
+    try std.testing.expectError(error.FsActionsRequireMountNamespace, validate(cfg));
+}

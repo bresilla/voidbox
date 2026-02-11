@@ -18,7 +18,26 @@ pub fn execute(actions: []const FsAction) !void {
     var current_size: ?usize = null;
     var mounted_targets = std.ArrayList(MountedTarget).empty;
     defer mounted_targets.deinit(std.heap.page_allocator);
+
+    var temp_files = std.ArrayList([]const u8).empty;
+    defer {
+        for (temp_files.items) |p| {
+            std.heap.page_allocator.free(p);
+        }
+        temp_files.deinit(std.heap.page_allocator);
+    }
+
+    var temp_dirs = std.ArrayList([]const u8).empty;
+    defer {
+        for (temp_dirs.items) |p| {
+            std.heap.page_allocator.free(p);
+        }
+        temp_dirs.deinit(std.heap.page_allocator);
+    }
+
     errdefer rollbackMounts(mounted_targets.items);
+    errdefer cleanupTempFiles(temp_files.items);
+    errdefer cleanupTempDirs(temp_dirs.items);
 
     for (actions) |action| {
         switch (action) {
@@ -165,6 +184,7 @@ pub fn execute(actions: []const FsAction) !void {
 
                 const overlay_base = try std.fmt.allocPrint(std.heap.page_allocator, "/tmp/.voidbox-overlay/{s}-{d}", .{ o.source_key, tmp_overlay_counter });
                 defer std.heap.page_allocator.free(overlay_base);
+                try temp_dirs.append(std.heap.page_allocator, try std.heap.page_allocator.dupe(u8, overlay_base));
                 const upper = try std.fmt.allocPrint(std.heap.page_allocator, "{s}/upper", .{overlay_base});
                 defer std.heap.page_allocator.free(upper);
                 const work = try std.fmt.allocPrint(std.heap.page_allocator, "{s}/work", .{overlay_base});
@@ -192,16 +212,19 @@ pub fn execute(actions: []const FsAction) !void {
             .bind_data => |b| {
                 const src = try writeDataSource(b.data, data_bind_counter);
                 defer std.heap.page_allocator.free(src);
+                try temp_files.append(std.heap.page_allocator, try std.heap.page_allocator.dupe(u8, src));
 
                 try ensurePath(b.dest);
                 const flags = linux.MS.BIND | linux.MS.REC;
                 try mountPath(src, b.dest, null, flags, null, error.BindMount);
                 try mounted_targets.append(std.heap.page_allocator, .{ .path = b.dest });
+                std.fs.deleteFileAbsolute(src) catch {};
                 data_bind_counter += 1;
             },
             .ro_bind_data => |b| {
                 const src = try writeDataSource(b.data, data_bind_counter);
                 defer std.heap.page_allocator.free(src);
+                try temp_files.append(std.heap.page_allocator, try std.heap.page_allocator.dupe(u8, src));
 
                 try ensurePath(b.dest);
                 const bind_flags = linux.MS.BIND | linux.MS.REC;
@@ -210,6 +233,7 @@ pub fn execute(actions: []const FsAction) !void {
 
                 const remount_flags = linux.MS.BIND | linux.MS.REMOUNT | linux.MS.RDONLY;
                 try mountPath(null, b.dest, null, remount_flags, null, error.RemountReadOnly);
+                std.fs.deleteFileAbsolute(src) catch {};
                 data_bind_counter += 1;
             },
             .file => |f| {
@@ -228,16 +252,19 @@ pub fn execute(actions: []const FsAction) !void {
             .bind_data_fd => |b| {
                 const src = try writeDataSourceFromFd(b.fd, data_bind_counter);
                 defer std.heap.page_allocator.free(src);
+                try temp_files.append(std.heap.page_allocator, try std.heap.page_allocator.dupe(u8, src));
 
                 try ensurePath(b.dest);
                 const flags = linux.MS.BIND | linux.MS.REC;
                 try mountPath(src, b.dest, null, flags, null, error.BindMount);
                 try mounted_targets.append(std.heap.page_allocator, .{ .path = b.dest });
+                std.fs.deleteFileAbsolute(src) catch {};
                 data_bind_counter += 1;
             },
             .ro_bind_data_fd => |b| {
                 const src = try writeDataSourceFromFd(b.fd, data_bind_counter);
                 defer std.heap.page_allocator.free(src);
+                try temp_files.append(std.heap.page_allocator, try std.heap.page_allocator.dupe(u8, src));
 
                 try ensurePath(b.dest);
                 const bind_flags = linux.MS.BIND | linux.MS.REC;
@@ -246,6 +273,7 @@ pub fn execute(actions: []const FsAction) !void {
 
                 const remount_flags = linux.MS.BIND | linux.MS.REMOUNT | linux.MS.RDONLY;
                 try mountPath(null, b.dest, null, remount_flags, null, error.RemountReadOnly);
+                std.fs.deleteFileAbsolute(src) catch {};
                 data_bind_counter += 1;
             },
             .file_fd => |f| {
@@ -293,6 +321,20 @@ fn rollbackMounts(mounted_targets: []const MountedTarget) void {
         i -= 1;
         var path_z = std.posix.toPosixPath(mounted_targets[i].path) catch continue;
         _ = linux.umount2(&path_z, linux.MNT.DETACH);
+    }
+}
+
+fn cleanupTempFiles(paths: []const []const u8) void {
+    for (paths) |p| {
+        std.fs.deleteFileAbsolute(p) catch {};
+    }
+}
+
+fn cleanupTempDirs(paths: []const []const u8) void {
+    var i = paths.len;
+    while (i > 0) {
+        i -= 1;
+        std.fs.deleteTreeAbsolute(paths[i]) catch {};
     }
 }
 

@@ -106,6 +106,8 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
 
     var seccomp_fds = std.ArrayList(i32).empty;
     defer seccomp_fds.deinit(allocator);
+    var saw_seccomp_fd = false;
+    var saw_add_seccomp_fd = false;
 
     var command = std.ArrayList([]const u8).empty;
     defer command.deinit(allocator);
@@ -452,11 +454,13 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
             const fd = try parseFd(try nextArg(args, &i, arg));
             seccomp_fds.clearRetainingCapacity();
             try seccomp_fds.append(allocator, fd);
+            saw_seccomp_fd = true;
             continue;
         }
         if (std.mem.eql(u8, arg, "--add-seccomp-fd")) {
             const fd = try parseFd(try nextArg(args, &i, arg));
             try seccomp_fds.append(allocator, fd);
+            saw_add_seccomp_fd = true;
             continue;
         }
         if (std.mem.eql(u8, arg, "--exec-label")) {
@@ -490,6 +494,8 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
 
         return error.UnknownOption;
     }
+
+    if (saw_seccomp_fd and saw_add_seccomp_fd) return error.SeccompFdConflict;
 
     cfg.process.set_env = try env_set.toOwnedSlice(allocator);
     cfg.process.unset_env = try env_unset.toOwnedSlice(allocator);
@@ -924,4 +930,13 @@ test "parseBwrapArgs maps bind-fd options to proc fd sources" {
     try std.testing.expect(parsed.cfg.fs_actions[1] == .ro_bind);
     try std.testing.expectEqualStrings("/proc/self/fd/9", parsed.cfg.fs_actions[0].bind.src);
     try std.testing.expectEqualStrings("/proc/self/fd/10", parsed.cfg.fs_actions[1].ro_bind.src);
+}
+
+test "parseBwrapArgs rejects mixing seccomp and add-seccomp-fd" {
+    const allocator = std.testing.allocator;
+    try std.testing.expectError(error.SeccompFdConflict, parseBwrapArgs(allocator, &.{
+        "--seccomp",        "3",
+        "--add-seccomp-fd", "4",
+        "--",               "/bin/true",
+    }));
 }

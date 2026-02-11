@@ -31,7 +31,7 @@ pub fn spawn(jail_config: JailConfig, allocator: std.mem.Allocator) !Session {
     }
 
     const lock_file = if (jail_config.status.lock_file_path) |path|
-        try openOrCreateFile(path)
+        try openOrCreateAndLockFile(path)
     else
         null;
 
@@ -73,11 +73,18 @@ fn signalFd(fd: i32) !void {
     _ = try std.posix.write(fd, &buf);
 }
 
-fn openOrCreateFile(path: []const u8) !std.fs.File {
-    return std.fs.openFileAbsolute(path, .{ .mode = .read_write }) catch |err| switch (err) {
-        error.FileNotFound => std.fs.createFileAbsolute(path, .{ .read = true, .truncate = false }),
-        else => err,
+fn openOrCreateAndLockFile(path: []const u8) !std.fs.File {
+    var file = std.fs.openFileAbsolute(path, .{ .mode = .read_only }) catch |err| switch (err) {
+        error.FileNotFound => try std.fs.createFileAbsolute(path, .{ .read = true, .truncate = false }),
+        else => return err,
     };
+
+    std.posix.flock(file.handle, std.posix.LOCK.EX | std.posix.LOCK.NB) catch |err| {
+        file.close();
+        return err;
+    };
+
+    return file;
 }
 
 test "signalFd writes supervisor sync byte" {
@@ -100,4 +107,13 @@ test "waitForFd consumes supervisor unblock byte" {
     const one = [_]u8{1};
     _ = try std.posix.write(pipefds[1], &one);
     try waitForFd(pipefds[0]);
+}
+
+test "openOrCreateAndLockFile acquires exclusive lock" {
+    const tmp_path = "/tmp/voidbox-session-lock-test";
+
+    var file_a = try openOrCreateAndLockFile(tmp_path);
+    defer file_a.close();
+
+    try std.testing.expectError(error.WouldBlock, openOrCreateAndLockFile(tmp_path));
 }

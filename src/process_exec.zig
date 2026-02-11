@@ -51,16 +51,18 @@ pub fn exec(
     cmd: []const []const u8,
     process: ProcessOptions,
 ) !void {
-    var exec_cmd = cmd;
-    var owns_exec_cmd = false;
+    if (cmd.len == 0) return error.CmdFailed;
+
+    var exec_argv = cmd;
+    var owns_exec_argv = false;
     if (process.argv0) |argv0| {
-        const cmd_copy = try allocator.alloc([]const u8, cmd.len);
-        @memcpy(cmd_copy, cmd);
-        cmd_copy[0] = argv0;
-        exec_cmd = cmd_copy;
-        owns_exec_cmd = true;
+        const argv_copy = try allocator.alloc([]const u8, cmd.len);
+        @memcpy(argv_copy, cmd);
+        argv_copy[0] = argv0;
+        exec_argv = argv_copy;
+        owns_exec_argv = true;
     }
-    defer if (owns_exec_cmd) allocator.free(exec_cmd);
+    defer if (owns_exec_argv) allocator.free(exec_argv);
 
     var env_map = if (process.clear_env)
         std.process.EnvMap.init(allocator)
@@ -75,5 +77,17 @@ pub fn exec(
         try env_map.put(entry.key, entry.value);
     }
 
-    std.process.execve(allocator, exec_cmd, &env_map) catch return error.CmdFailed;
+    var arena_allocator = std.heap.ArenaAllocator.init(allocator);
+    defer arena_allocator.deinit();
+    const arena = arena_allocator.allocator();
+
+    const argv_buf = try arena.allocSentinel(?[*:0]const u8, exec_argv.len, null);
+    for (exec_argv, 0..) |arg, i| {
+        argv_buf[i] = (try arena.dupeZ(u8, arg)).ptr;
+    }
+    const file_z = (try arena.dupeZ(u8, cmd[0])).ptr;
+
+    const envp_buf = try std.process.createNullDelimitedEnvMap(arena, &env_map);
+
+    std.posix.execvpeZ_expandArg0(.no_expand, file_z, argv_buf.ptr, envp_buf.ptr) catch return error.CmdFailed;
 }

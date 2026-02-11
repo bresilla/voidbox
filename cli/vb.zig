@@ -1,9 +1,16 @@
 const std = @import("std");
+const linux = std.os.linux;
 const voidbox = @import("voidbox");
 
 const Parsed = struct {
     cfg: voidbox.JailConfig,
     cmd: []const []const u8,
+    try_options: TryOptions,
+};
+
+const TryOptions = struct {
+    unshare_user_try: bool = false,
+    unshare_cgroup_try: bool = false,
 };
 
 pub fn main() !void {
@@ -26,21 +33,42 @@ pub fn main() !void {
     };
     defer allocator.free(parsed.cmd);
 
-    voidbox.validate(parsed.cfg) catch |err| {
-        std.debug.print("validation failed: {s}\n", .{@errorName(err)});
-        std.posix.exit(2);
+    var cfg = parsed.cfg;
+    var fallback_used = false;
+
+    const outcome = launch: while (true) {
+        voidbox.validate(cfg) catch |err| {
+            std.debug.print("validation failed: {s}\n", .{@errorName(err)});
+            std.posix.exit(2);
+        };
+
+        const launch_result = voidbox.launch(cfg, allocator);
+        if (launch_result) |ok| {
+            if (!fallback_used and ok.exit_code == 127 and applyTryFallbackOnSpawnFailure(&cfg, parsed.try_options)) {
+                fallback_used = true;
+                continue;
+            }
+            break :launch ok;
+        } else |err| {
+            if (!fallback_used and err == error.SpawnFailed and applyTryFallbackOnSpawnFailure(&cfg, parsed.try_options)) {
+                fallback_used = true;
+                continue;
+            }
+
+            std.debug.print("launch failed: {s}\n", .{@errorName(err)});
+            std.debug.print("hint: verify required namespaces/capabilities are available on this host\n", .{});
+            std.posix.exit(1);
+        }
     };
 
-    const outcome = voidbox.launch(parsed.cfg, allocator) catch |err| {
-        std.debug.print("launch failed: {s}\n", .{@errorName(err)});
-        std.debug.print("hint: verify required namespaces/capabilities are available on this host\n", .{});
-        std.posix.exit(1);
-    };
     std.posix.exit(outcome.exit_code);
 }
 
 fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed {
-    if (raw.len == 0) return error.HelpRequested;
+    const args = try expandArgsFromFd(allocator, raw, 0);
+    defer allocator.free(args);
+
+    if (args.len == 0) return error.HelpRequested;
 
     var cfg: voidbox.JailConfig = .{
         .name = "sandbox",
@@ -49,7 +77,7 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
         .isolation = .{
             .user = false,
             .net = false,
-            .mount = false,
+            .mount = true,
             .pid = false,
             .uts = false,
             .ipc = false,
@@ -84,33 +112,36 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
     defer command.deinit(allocator);
 
     var i: usize = 0;
-    while (i < raw.len) : (i += 1) {
-        const arg = raw[i];
+    var try_options = TryOptions{};
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+
+        if (std.mem.eql(u8, arg, "-h")) return error.HelpRequested;
 
         if (std.mem.eql(u8, arg, "--")) {
             i += 1;
-            while (i < raw.len) : (i += 1) {
-                try command.append(allocator, raw[i]);
+            while (i < args.len) : (i += 1) {
+                try command.append(allocator, args[i]);
             }
             break;
         }
 
         if (!std.mem.startsWith(u8, arg, "--")) {
-            while (i < raw.len) : (i += 1) {
-                try command.append(allocator, raw[i]);
+            while (i < args.len) : (i += 1) {
+                try command.append(allocator, args[i]);
             }
             break;
         }
 
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) return error.HelpRequested;
         if (std.mem.eql(u8, arg, "--version")) {
-            std.debug.print("vb 0.0.1\n", .{});
+            const out = std.fs.File.stdout().deprecatedWriter();
+            try out.writeAll("vb 0.0.1\n");
             std.posix.exit(0);
         }
         if (std.mem.eql(u8, arg, "--level-prefix")) continue;
         if (std.mem.eql(u8, arg, "--args")) {
-            _ = try nextArg(raw, &i, "--args");
-            continue;
+            return error.ArgsAlreadyExpanded;
         }
 
         if (std.mem.eql(u8, arg, "--unshare-all")) {
@@ -126,8 +157,13 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
             cfg.isolation.net = false;
             continue;
         }
-        if (std.mem.eql(u8, arg, "--unshare-user") or std.mem.eql(u8, arg, "--unshare-user-try")) {
+        if (std.mem.eql(u8, arg, "--unshare-user")) {
             cfg.isolation.user = true;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--unshare-user-try")) {
+            cfg.isolation.user = true;
+            try_options.unshare_user_try = true;
             continue;
         }
         if (std.mem.eql(u8, arg, "--unshare-ipc")) {
@@ -146,21 +182,30 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
             cfg.isolation.uts = true;
             continue;
         }
-        if (std.mem.eql(u8, arg, "--unshare-cgroup") or std.mem.eql(u8, arg, "--unshare-cgroup-try")) {
+        if (std.mem.eql(u8, arg, "--unshare-mount")) {
+            cfg.isolation.mount = true;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--unshare-cgroup")) {
             cfg.isolation.cgroup = true;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--unshare-cgroup-try")) {
+            cfg.isolation.cgroup = true;
+            try_options.unshare_cgroup_try = true;
             continue;
         }
 
         if (std.mem.eql(u8, arg, "--userns")) {
-            cfg.namespace_fds.user = try parseFd(try nextArg(raw, &i, arg));
+            cfg.namespace_fds.user = try parseFd(try nextArg(args, &i, arg));
             continue;
         }
         if (std.mem.eql(u8, arg, "--userns2")) {
-            cfg.namespace_fds.user2 = try parseFd(try nextArg(raw, &i, arg));
+            cfg.namespace_fds.user2 = try parseFd(try nextArg(args, &i, arg));
             continue;
         }
         if (std.mem.eql(u8, arg, "--pidns")) {
-            cfg.namespace_fds.pid = try parseFd(try nextArg(raw, &i, arg));
+            cfg.namespace_fds.pid = try parseFd(try nextArg(args, &i, arg));
             continue;
         }
         if (std.mem.eql(u8, arg, "--disable-userns")) {
@@ -172,34 +217,34 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
             continue;
         }
         if (std.mem.eql(u8, arg, "--uid")) {
-            cfg.runtime.uid = @intCast(try parseFd(try nextArg(raw, &i, arg)));
+            cfg.runtime.uid = @intCast(try parseFd(try nextArg(args, &i, arg)));
             continue;
         }
         if (std.mem.eql(u8, arg, "--gid")) {
-            cfg.runtime.gid = @intCast(try parseFd(try nextArg(raw, &i, arg)));
+            cfg.runtime.gid = @intCast(try parseFd(try nextArg(args, &i, arg)));
             continue;
         }
         if (std.mem.eql(u8, arg, "--hostname")) {
-            cfg.runtime.hostname = try nextArg(raw, &i, arg);
+            cfg.runtime.hostname = try nextArg(args, &i, arg);
             continue;
         }
 
         if (std.mem.eql(u8, arg, "--argv0")) {
-            cfg.process.argv0 = try nextArg(raw, &i, arg);
+            cfg.process.argv0 = try nextArg(args, &i, arg);
             continue;
         }
         if (std.mem.eql(u8, arg, "--chdir")) {
-            cfg.process.chdir = try nextArg(raw, &i, arg);
+            cfg.process.chdir = try nextArg(args, &i, arg);
             continue;
         }
         if (std.mem.eql(u8, arg, "--setenv")) {
-            const key = try nextArg(raw, &i, arg);
-            const value = try nextArg(raw, &i, arg);
+            const key = try nextArg(args, &i, arg);
+            const value = try nextArg(args, &i, arg);
             try env_set.append(allocator, .{ .key = key, .value = value });
             continue;
         }
         if (std.mem.eql(u8, arg, "--unsetenv")) {
-            try env_unset.append(allocator, try nextArg(raw, &i, arg));
+            try env_unset.append(allocator, try nextArg(args, &i, arg));
             continue;
         }
         if (std.mem.eql(u8, arg, "--clearenv")) {
@@ -208,89 +253,89 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
         }
 
         if (std.mem.eql(u8, arg, "--lock-file")) {
-            cfg.status.lock_file_path = try nextArg(raw, &i, arg);
+            cfg.status.lock_file_path = try nextArg(args, &i, arg);
             continue;
         }
         if (std.mem.eql(u8, arg, "--sync-fd")) {
-            cfg.status.sync_fd = try parseFd(try nextArg(raw, &i, arg));
+            cfg.status.sync_fd = try parseFd(try nextArg(args, &i, arg));
             continue;
         }
         if (std.mem.eql(u8, arg, "--block-fd")) {
-            cfg.status.block_fd = try parseFd(try nextArg(raw, &i, arg));
+            cfg.status.block_fd = try parseFd(try nextArg(args, &i, arg));
             continue;
         }
         if (std.mem.eql(u8, arg, "--userns-block-fd")) {
-            cfg.status.userns_block_fd = try parseFd(try nextArg(raw, &i, arg));
+            cfg.status.userns_block_fd = try parseFd(try nextArg(args, &i, arg));
             continue;
         }
         if (std.mem.eql(u8, arg, "--info-fd")) {
-            cfg.status.info_fd = try parseFd(try nextArg(raw, &i, arg));
+            cfg.status.info_fd = try parseFd(try nextArg(args, &i, arg));
             continue;
         }
         if (std.mem.eql(u8, arg, "--json-status-fd")) {
-            cfg.status.json_status_fd = try parseFd(try nextArg(raw, &i, arg));
+            cfg.status.json_status_fd = try parseFd(try nextArg(args, &i, arg));
             continue;
         }
 
         if (std.mem.eql(u8, arg, "--perms")) {
-            pending_mode = try std.fmt.parseInt(u32, try nextArg(raw, &i, arg), 8);
+            pending_mode = try std.fmt.parseInt(u32, try nextArg(args, &i, arg), 8);
             continue;
         }
         if (std.mem.eql(u8, arg, "--size")) {
-            pending_size = try std.fmt.parseInt(usize, try nextArg(raw, &i, arg), 10);
+            pending_size = try std.fmt.parseInt(usize, try nextArg(args, &i, arg), 10);
             continue;
         }
 
         if (std.mem.eql(u8, arg, "--bind")) {
-            const src = try nextArg(raw, &i, arg);
-            const dest = try nextArg(raw, &i, arg);
+            const src = try nextArg(args, &i, arg);
+            const dest = try nextArg(args, &i, arg);
             try fs_actions.append(allocator, .{ .bind = .{ .src = src, .dest = dest } });
             continue;
         }
         if (std.mem.eql(u8, arg, "--bind-try")) {
-            const src = try nextArg(raw, &i, arg);
-            const dest = try nextArg(raw, &i, arg);
+            const src = try nextArg(args, &i, arg);
+            const dest = try nextArg(args, &i, arg);
             try fs_actions.append(allocator, .{ .bind_try = .{ .src = src, .dest = dest } });
             continue;
         }
         if (std.mem.eql(u8, arg, "--dev-bind")) {
-            const src = try nextArg(raw, &i, arg);
-            const dest = try nextArg(raw, &i, arg);
+            const src = try nextArg(args, &i, arg);
+            const dest = try nextArg(args, &i, arg);
             try fs_actions.append(allocator, .{ .dev_bind = .{ .src = src, .dest = dest } });
             continue;
         }
         if (std.mem.eql(u8, arg, "--dev-bind-try")) {
-            const src = try nextArg(raw, &i, arg);
-            const dest = try nextArg(raw, &i, arg);
+            const src = try nextArg(args, &i, arg);
+            const dest = try nextArg(args, &i, arg);
             try fs_actions.append(allocator, .{ .dev_bind_try = .{ .src = src, .dest = dest } });
             continue;
         }
         if (std.mem.eql(u8, arg, "--ro-bind")) {
-            const src = try nextArg(raw, &i, arg);
-            const dest = try nextArg(raw, &i, arg);
+            const src = try nextArg(args, &i, arg);
+            const dest = try nextArg(args, &i, arg);
             try fs_actions.append(allocator, .{ .ro_bind = .{ .src = src, .dest = dest } });
             continue;
         }
         if (std.mem.eql(u8, arg, "--ro-bind-try")) {
-            const src = try nextArg(raw, &i, arg);
-            const dest = try nextArg(raw, &i, arg);
+            const src = try nextArg(args, &i, arg);
+            const dest = try nextArg(args, &i, arg);
             try fs_actions.append(allocator, .{ .ro_bind_try = .{ .src = src, .dest = dest } });
             continue;
         }
         if (std.mem.eql(u8, arg, "--remount-ro")) {
-            try fs_actions.append(allocator, .{ .remount_ro = try nextArg(raw, &i, arg) });
+            try fs_actions.append(allocator, .{ .remount_ro = try nextArg(args, &i, arg) });
             continue;
         }
         if (std.mem.eql(u8, arg, "--proc")) {
-            try fs_actions.append(allocator, .{ .proc = try nextArg(raw, &i, arg) });
+            try fs_actions.append(allocator, .{ .proc = try nextArg(args, &i, arg) });
             continue;
         }
         if (std.mem.eql(u8, arg, "--dev")) {
-            try fs_actions.append(allocator, .{ .dev = try nextArg(raw, &i, arg) });
+            try fs_actions.append(allocator, .{ .dev = try nextArg(args, &i, arg) });
             continue;
         }
         if (std.mem.eql(u8, arg, "--tmpfs")) {
-            const dest = try nextArg(raw, &i, arg);
+            const dest = try nextArg(args, &i, arg);
             try maybeApplyPending(allocator, &fs_actions, &pending_mode, &pending_size);
             try fs_actions.append(allocator, .{ .tmpfs = .{ .dest = dest, .mode = pending_mode, .size_bytes = pending_size } });
             pending_mode = null;
@@ -298,11 +343,11 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
             continue;
         }
         if (std.mem.eql(u8, arg, "--mqueue")) {
-            try fs_actions.append(allocator, .{ .mqueue = try nextArg(raw, &i, arg) });
+            try fs_actions.append(allocator, .{ .mqueue = try nextArg(args, &i, arg) });
             continue;
         }
         if (std.mem.eql(u8, arg, "--dir")) {
-            const dest = try nextArg(raw, &i, arg);
+            const dest = try nextArg(args, &i, arg);
             try maybeApplyPending(allocator, &fs_actions, &pending_mode, &pending_size);
             try fs_actions.append(allocator, .{ .dir = .{ .path = dest, .mode = pending_mode } });
             pending_mode = null;
@@ -310,37 +355,37 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
             continue;
         }
         if (std.mem.eql(u8, arg, "--file")) {
-            const fd = try parseFd(try nextArg(raw, &i, arg));
-            const dest = try nextArg(raw, &i, arg);
+            const fd = try parseFd(try nextArg(args, &i, arg));
+            const dest = try nextArg(args, &i, arg);
             try fs_actions.append(allocator, .{ .file_fd = .{ .path = dest, .fd = fd } });
             continue;
         }
         if (std.mem.eql(u8, arg, "--bind-data")) {
-            const fd = try parseFd(try nextArg(raw, &i, arg));
-            const dest = try nextArg(raw, &i, arg);
+            const fd = try parseFd(try nextArg(args, &i, arg));
+            const dest = try nextArg(args, &i, arg);
             try fs_actions.append(allocator, .{ .bind_data_fd = .{ .dest = dest, .fd = fd } });
             continue;
         }
         if (std.mem.eql(u8, arg, "--ro-bind-data")) {
-            const fd = try parseFd(try nextArg(raw, &i, arg));
-            const dest = try nextArg(raw, &i, arg);
+            const fd = try parseFd(try nextArg(args, &i, arg));
+            const dest = try nextArg(args, &i, arg);
             try fs_actions.append(allocator, .{ .ro_bind_data_fd = .{ .dest = dest, .fd = fd } });
             continue;
         }
         if (std.mem.eql(u8, arg, "--symlink")) {
-            const src = try nextArg(raw, &i, arg);
-            const dest = try nextArg(raw, &i, arg);
+            const src = try nextArg(args, &i, arg);
+            const dest = try nextArg(args, &i, arg);
             try fs_actions.append(allocator, .{ .symlink = .{ .target = src, .path = dest } });
             continue;
         }
         if (std.mem.eql(u8, arg, "--chmod")) {
-            const mode = try std.fmt.parseInt(u32, try nextArg(raw, &i, arg), 8);
-            const path = try nextArg(raw, &i, arg);
+            const mode = try std.fmt.parseInt(u32, try nextArg(args, &i, arg), 8);
+            const path = try nextArg(args, &i, arg);
             try fs_actions.append(allocator, .{ .chmod = .{ .path = path, .mode = mode } });
             continue;
         }
         if (std.mem.eql(u8, arg, "--overlay-src")) {
-            const src = try nextArg(raw, &i, arg);
+            const src = try nextArg(args, &i, arg);
             const key = try std.fmt.allocPrint(allocator, "ov{d}", .{overlay_key_index});
             overlay_key_index += 1;
             latest_overlay_key = key;
@@ -348,34 +393,34 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
             continue;
         }
         if (std.mem.eql(u8, arg, "--overlay")) {
-            const upper = try nextArg(raw, &i, arg);
-            const work = try nextArg(raw, &i, arg);
-            const dest = try nextArg(raw, &i, arg);
+            const upper = try nextArg(args, &i, arg);
+            const work = try nextArg(args, &i, arg);
+            const dest = try nextArg(args, &i, arg);
             const key = latest_overlay_key orelse return error.MissingOverlaySource;
             try fs_actions.append(allocator, .{ .overlay = .{ .source_key = key, .upper = upper, .work = work, .dest = dest } });
             continue;
         }
         if (std.mem.eql(u8, arg, "--tmp-overlay")) {
-            const dest = try nextArg(raw, &i, arg);
+            const dest = try nextArg(args, &i, arg);
             const key = latest_overlay_key orelse return error.MissingOverlaySource;
             try fs_actions.append(allocator, .{ .tmp_overlay = .{ .source_key = key, .dest = dest } });
             continue;
         }
         if (std.mem.eql(u8, arg, "--ro-overlay")) {
-            const dest = try nextArg(raw, &i, arg);
+            const dest = try nextArg(args, &i, arg);
             const key = latest_overlay_key orelse return error.MissingOverlaySource;
             try fs_actions.append(allocator, .{ .ro_overlay = .{ .source_key = key, .dest = dest } });
             continue;
         }
 
         if (std.mem.eql(u8, arg, "--seccomp")) {
-            const fd = try parseFd(try nextArg(raw, &i, arg));
+            const fd = try parseFd(try nextArg(args, &i, arg));
             seccomp_fds.clearRetainingCapacity();
             try seccomp_fds.append(allocator, fd);
             continue;
         }
         if (std.mem.eql(u8, arg, "--add-seccomp-fd")) {
-            const fd = try parseFd(try nextArg(raw, &i, arg));
+            const fd = try parseFd(try nextArg(args, &i, arg));
             try seccomp_fds.append(allocator, fd);
             continue;
         }
@@ -395,11 +440,11 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
             continue;
         }
         if (std.mem.eql(u8, arg, "--cap-add")) {
-            try appendCapabilities(allocator, &cap_add, try nextArg(raw, &i, arg));
+            try appendCapabilities(allocator, &cap_add, try nextArg(args, &i, arg));
             continue;
         }
         if (std.mem.eql(u8, arg, "--cap-drop")) {
-            try appendCapabilities(allocator, &cap_drop, try nextArg(raw, &i, arg));
+            try appendCapabilities(allocator, &cap_drop, try nextArg(args, &i, arg));
             continue;
         }
 
@@ -413,9 +458,102 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
     cfg.security.seccomp_filter_fds = try seccomp_fds.toOwnedSlice(allocator);
     cfg.fs_actions = try fs_actions.toOwnedSlice(allocator);
     if (cfg.fs_actions.len > 0) cfg.isolation.mount = true;
+
+    applyTryIsolationSemantics(&cfg, try_options);
+
     cfg.cmd = if (command.items.len == 0) &.{"/bin/sh"} else try command.toOwnedSlice(allocator);
 
-    return .{ .cfg = cfg, .cmd = cfg.cmd };
+    return .{ .cfg = cfg, .cmd = cfg.cmd, .try_options = try_options };
+}
+
+fn applyTryFallbackOnSpawnFailure(cfg: *voidbox.JailConfig, try_options: TryOptions) bool {
+    var changed = false;
+    if (try_options.unshare_user_try and cfg.isolation.user) {
+        cfg.isolation.user = false;
+        changed = true;
+    }
+    if (try_options.unshare_cgroup_try and cfg.isolation.cgroup) {
+        cfg.isolation.cgroup = false;
+        changed = true;
+    }
+    return changed;
+}
+
+fn applyTryIsolationSemantics(cfg: *voidbox.JailConfig, try_options: TryOptions) void {
+    if (try_options.unshare_user_try and !probeUserNamespaceRootMapping()) {
+        cfg.isolation.user = false;
+    }
+    if (try_options.unshare_cgroup_try and !probeUnshare(linux.CLONE.NEWCGROUP)) {
+        cfg.isolation.cgroup = false;
+    }
+}
+
+fn probeUnshare(flag: u32) bool {
+    const child_pid = std.posix.fork() catch return false;
+    if (child_pid == 0) {
+        const rc = linux.unshare(flag);
+        const signed: isize = @bitCast(rc);
+        if (signed < 0 and signed > -4096) linux.exit(1);
+        linux.exit(0);
+    }
+
+    const wait_res = std.posix.waitpid(child_pid, 0);
+    const status = wait_res.status;
+    if ((status & 0x7f) == 0) {
+        return ((status >> 8) & 0xff) == 0;
+    }
+    return false;
+}
+
+fn probeUserNamespaceRootMapping() bool {
+    const uid = linux.getuid();
+    const gid = linux.getgid();
+
+    const child_pid = std.posix.fork() catch return false;
+    if (child_pid == 0) {
+        const unshare_res = linux.unshare(linux.CLONE.NEWUSER);
+        const unshare_signed: isize = @bitCast(unshare_res);
+        if (unshare_signed < 0 and unshare_signed > -4096) linux.exit(1);
+
+        var uid_buf: [64]u8 = undefined;
+        var gid_buf: [64]u8 = undefined;
+        const uid_line = std.fmt.bufPrint(&uid_buf, "0 {} 1\n", .{uid}) catch {
+            linux.exit(1);
+        };
+        const gid_line = std.fmt.bufPrint(&gid_buf, "0 {} 1\n", .{gid}) catch {
+            linux.exit(1);
+        };
+
+        if (std.fs.openFileAbsolute("/proc/self/setgroups", .{ .mode = .write_only })) |setgroups_file| {
+            defer setgroups_file.close();
+            _ = setgroups_file.write("deny\n") catch {};
+        } else |_| {}
+
+        var uid_map = std.fs.openFileAbsolute("/proc/self/uid_map", .{ .mode = .write_only }) catch {
+            linux.exit(1);
+        };
+        defer uid_map.close();
+        _ = uid_map.write(uid_line) catch {
+            linux.exit(1);
+        };
+
+        var gid_map = std.fs.openFileAbsolute("/proc/self/gid_map", .{ .mode = .write_only }) catch {
+            linux.exit(1);
+        };
+        defer gid_map.close();
+        _ = gid_map.write(gid_line) catch {
+            linux.exit(1);
+        };
+
+        linux.exit(0);
+    }
+
+    const wait_res = std.posix.waitpid(child_pid, 0);
+    const status = wait_res.status;
+    if ((status & 0x7f) == 0) {
+        return ((status >> 8) & 0xff) == 0;
+    }
+    return false;
 }
 
 fn appendCapabilities(allocator: std.mem.Allocator, out: *std.ArrayList(u8), raw: []const u8) !void {
@@ -461,6 +599,60 @@ fn nextArg(args: []const []const u8, i: *usize, option: []const u8) ![]const u8 
     return args[i.*];
 }
 
+fn expandArgsFromFd(allocator: std.mem.Allocator, input: []const []const u8, depth: usize) ![]const []const u8 {
+    if (depth > 8) return error.ArgsExpansionDepthExceeded;
+
+    var out = std.ArrayList([]const u8).empty;
+    defer out.deinit(allocator);
+
+    var i: usize = 0;
+    while (i < input.len) : (i += 1) {
+        const arg = input[i];
+        if (std.mem.eql(u8, arg, "--args")) {
+            if (i + 1 >= input.len) return error.MissingOptionValue;
+            i += 1;
+            const fd = try parseFd(input[i]);
+            const expanded = try readArgVectorFromFd(allocator, fd);
+            defer allocator.free(expanded);
+
+            const nested = try expandArgsFromFd(allocator, expanded, depth + 1);
+            defer allocator.free(nested);
+            try out.appendSlice(allocator, nested);
+            continue;
+        }
+
+        try out.append(allocator, arg);
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn readArgVectorFromFd(allocator: std.mem.Allocator, fd: i32) ![]const []const u8 {
+    var file = std.fs.File{ .handle = fd };
+    const data = try file.readToEndAlloc(allocator, 1 << 20);
+    defer allocator.free(data);
+
+    var out = std.ArrayList([]const u8).empty;
+    defer out.deinit(allocator);
+
+    var start: usize = 0;
+    var idx: usize = 0;
+    while (idx < data.len) : (idx += 1) {
+        if (data[idx] != 0) continue;
+        if (idx > start) {
+            const dup = try allocator.dupe(u8, data[start..idx]);
+            try out.append(allocator, dup);
+        }
+        start = idx + 1;
+    }
+    if (start < data.len) {
+        const dup = try allocator.dupe(u8, data[start..]);
+        try out.append(allocator, dup);
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
 fn parseFd(raw: []const u8) !i32 {
     const v = try std.fmt.parseInt(i32, raw, 10);
     if (v < 0) return error.InvalidFd;
@@ -491,7 +683,7 @@ fn printUsage() !void {
     try out.print("{s}General{s}\n", .{ section, reset });
     try out.print("  {s}--help{s}                   Show this help\n", .{ option, reset });
     try out.print("  {s}--version{s}                Print version\n", .{ option, reset });
-    try out.print("  {s}--args{s} FD                Parse nul-separated args from FD (placeholder)\n", .{ option, reset });
+    try out.print("  {s}--args{s} FD                Parse NUL-separated args from FD\n", .{ option, reset });
     try out.print("  {s}--level-prefix{s}           Accepted for compatibility\n\n", .{ option, reset });
 
     try out.print("{s}Namespaces{s}\n", .{ section, reset });

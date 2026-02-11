@@ -94,26 +94,30 @@ pub fn spawn(self: *Container) !linux.pid_t {
     var ctid: i32 = 0;
     var ptid: i32 = 0;
     const clone_flags = namespace.computeCloneFlags(self.isolation);
-    const pid = linux.clone(childFn, @intFromPtr(&stack[0]) + stack.len, clone_flags, @intFromPtr(&childp_args), &ptid, 0, &ctid);
-    try checkErr(pid, error.CloneFailed);
-    std.posix.close(childp_args.pipe[0]);
+    const clone_res = linux.clone(childFn, @intFromPtr(&stack[0]) + stack.len, clone_flags, @intFromPtr(&childp_args), &ptid, 0, &ctid);
+    try checkErr(clone_res, error.CloneFailed);
+
+    const pid_signed: isize = @bitCast(clone_res);
+    if (pid_signed <= 0) return error.CloneFailed;
+    const pid: linux.pid_t = @intCast(pid_signed);
+    _ = linux.close(childp_args.pipe[0]);
 
     // move one of the veth pairs to
     // the child process network namespace
     if (self.net) |*net| {
-        try net.moveVethToNs(@intCast(pid));
+        try net.moveVethToNs(pid);
     }
     // enter container cgroup
-    try self.cgroup.enterCgroup(@intCast(pid));
+    try self.cgroup.enterCgroup(pid);
 
     if (self.status.userns_block_fd) |fd| {
         try waitForFd(fd);
     }
     if (self.isolation.user) {
-        namespace.writeUserRootMappings(self.allocator, @intCast(pid)) catch |err| {
-            std.posix.close(childp_args.pipe[1]);
-            std.posix.kill(@intCast(pid), std.posix.SIG.KILL) catch {};
-            _ = std.posix.waitpid(@intCast(pid), 0);
+        namespace.writeUserRootMappings(self.allocator, pid) catch |err| {
+            _ = linux.close(childp_args.pipe[1]);
+            std.posix.kill(pid, std.posix.SIG.KILL) catch {};
+            _ = std.posix.waitpid(pid, 0);
             return err;
         };
     }
@@ -161,49 +165,47 @@ fn waitForFd(fd: i32) !void {
 
 export fn childFn(a: usize) u8 {
     const arg: *ChildProcessArgs = @ptrFromInt(a);
-    std.posix.close(arg.pipe[1]);
+    _ = linux.close(arg.pipe[1]);
     // block until parent sets up needed resources
     {
         var buff = [_]u8{1};
-        _ = std.posix.read(arg.pipe[0], &buff) catch @panic("pipe read failed");
+        _ = std.posix.read(arg.pipe[0], &buff) catch {
+            childExit(127);
+        };
     }
 
     if (arg.container.namespace_fds.pid) |pidns_fd| {
-        namespace_sequence.preparePidNamespace(pidns_fd, arg.container.isolation.pid) catch |e| {
-            log.err("pidns prepare failed: {}", .{e});
-            std.posix.exit(127);
+        namespace_sequence.preparePidNamespace(pidns_fd, arg.container.isolation.pid) catch {
+            childExit(127);
         };
 
         const pid = std.posix.fork() catch {
-            std.posix.exit(127);
+            childExit(127);
         };
 
         if (pid != 0) {
             const wait_res = std.posix.waitpid(pid, 0);
             const code = decodeWaitStatus(wait_res.status) catch 127;
-            std.posix.exit(code);
+            childExit(code);
         }
     }
 
     if (arg.container.isolation.pid) {
         if (arg.container.runtime.as_pid_1) {
-            arg.container.execCmd(arg.uid, arg.gid) catch |e| {
-                log.err("pid1 cmd failed: {}", .{e});
-                std.posix.exit(127);
+            arg.container.execCmd(arg.uid, arg.gid) catch {
+                childExit(127);
             };
-            unreachable;
+            childExit(0);
         }
 
-        const code = arg.container.execAsPid1(arg.uid, arg.gid) catch |e| {
-            log.err("err: {}", .{e});
-            std.posix.exit(127);
+        const code = arg.container.execAsPid1(arg.uid, arg.gid) catch {
+            childExit(127);
         };
-        std.posix.exit(code);
+        childExit(code);
     }
 
-    arg.container.execCmd(arg.uid, arg.gid) catch |e| {
-        log.err("err: {}", .{e});
-        @panic("run failed");
+    arg.container.execCmd(arg.uid, arg.gid) catch {
+        childExit(127);
     };
 
     return 0;
@@ -212,15 +214,18 @@ export fn childFn(a: usize) u8 {
 fn execAsPid1(self: *Container, uid: linux.uid_t, gid: linux.gid_t) !u8 {
     const child_pid = try std.posix.fork();
     if (child_pid == 0) {
-        self.execCmd(uid, gid) catch |e| {
-            log.err("cmd failed in pid1 child: {}", .{e});
-            std.posix.exit(127);
+        self.execCmd(uid, gid) catch {
+            childExit(127);
         };
-        unreachable;
+        childExit(0);
     }
 
     const wait_res = std.posix.waitpid(child_pid, 0);
     return decodeWaitStatus(wait_res.status);
+}
+
+fn childExit(code: u8) noreturn {
+    linux.exit(code);
 }
 
 fn decodeWaitStatus(status_bits: u32) !u8 {

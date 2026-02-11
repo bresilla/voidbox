@@ -6,6 +6,7 @@ const Parsed = struct {
     cfg: voidbox.JailConfig,
     cmd: []const []const u8,
     try_options: TryOptions,
+    level_prefix: bool,
 };
 
 const TryOptions = struct {
@@ -21,13 +22,15 @@ pub fn main() !void {
     const argv = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, argv);
 
+    const parse_level_prefix = hasLevelPrefix(argv[1..]);
+
     const parsed = parseBwrapArgs(allocator, argv[1..]) catch |err| {
         if (err == error.HelpRequested) {
             try printUsage();
             std.posix.exit(0);
         }
 
-        try printCliError(err);
+        try printCliError(err, parse_level_prefix);
         try printUsage();
         std.posix.exit(2);
     };
@@ -38,7 +41,7 @@ pub fn main() !void {
 
     const outcome = launch: while (true) {
         voidbox.validate(cfg) catch |err| {
-            std.debug.print("validation failed: {s}\n", .{@errorName(err)});
+            try printWithPrefix(parsed.level_prefix, "validation failed: {s}\n", .{@errorName(err)});
             std.posix.exit(2);
         };
 
@@ -55,8 +58,8 @@ pub fn main() !void {
                 continue;
             }
 
-            std.debug.print("launch failed: {s}\n", .{@errorName(err)});
-            std.debug.print("hint: verify required namespaces/capabilities are available on this host\n", .{});
+            try printWithPrefix(parsed.level_prefix, "launch failed: {s}\n", .{@errorName(err)});
+            try printWithPrefix(parsed.level_prefix, "hint: verify required namespaces/capabilities are available on this host\n", .{});
             std.posix.exit(1);
         }
     };
@@ -113,6 +116,7 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
 
     var i: usize = 0;
     var try_options = TryOptions{};
+    var level_prefix = false;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
 
@@ -139,7 +143,10 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
             try out.writeAll("vb 0.0.1\n");
             std.posix.exit(0);
         }
-        if (std.mem.eql(u8, arg, "--level-prefix")) continue;
+        if (std.mem.eql(u8, arg, "--level-prefix")) {
+            level_prefix = true;
+            continue;
+        }
         if (std.mem.eql(u8, arg, "--args")) {
             return error.ArgsAlreadyExpanded;
         }
@@ -463,7 +470,14 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
 
     cfg.cmd = if (command.items.len == 0) &.{"/bin/sh"} else try command.toOwnedSlice(allocator);
 
-    return .{ .cfg = cfg, .cmd = cfg.cmd, .try_options = try_options };
+    return .{ .cfg = cfg, .cmd = cfg.cmd, .try_options = try_options, .level_prefix = level_prefix };
+}
+
+fn hasLevelPrefix(args: []const []const u8) bool {
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, "--level-prefix")) return true;
+    }
+    return false;
 }
 
 fn applyTryFallbackOnSpawnFailure(cfg: *voidbox.JailConfig, try_options: TryOptions) bool {
@@ -480,7 +494,7 @@ fn applyTryFallbackOnSpawnFailure(cfg: *voidbox.JailConfig, try_options: TryOpti
 }
 
 fn applyTryIsolationSemantics(cfg: *voidbox.JailConfig, try_options: TryOptions) void {
-    if (try_options.unshare_user_try and !probeUserNamespaceRootMapping()) {
+    if (try_options.unshare_user_try and !probeUserIsolationPath()) {
         cfg.isolation.user = false;
     }
     if (try_options.unshare_cgroup_try and !probeUnshare(linux.CLONE.NEWCGROUP)) {
@@ -505,7 +519,7 @@ fn probeUnshare(flag: u32) bool {
     return false;
 }
 
-fn probeUserNamespaceRootMapping() bool {
+fn probeUserIsolationPath() bool {
     const uid = linux.getuid();
     const gid = linux.getgid();
 
@@ -544,6 +558,18 @@ fn probeUserNamespaceRootMapping() bool {
         _ = gid_map.write(gid_line) catch {
             linux.exit(1);
         };
+
+        const mount_ns_res = linux.unshare(linux.CLONE.NEWNS);
+        const mount_ns_signed: isize = @bitCast(mount_ns_res);
+        if (mount_ns_signed < 0 and mount_ns_signed > -4096) {
+            linux.exit(1);
+        }
+
+        const make_private_res = linux.mount(null, "/", null, linux.MS.REC | linux.MS.PRIVATE, 0);
+        const make_private_signed: isize = @bitCast(make_private_res);
+        if (make_private_signed < 0 and make_private_signed > -4096) {
+            linux.exit(1);
+        }
 
         linux.exit(0);
     }
@@ -659,12 +685,19 @@ fn parseFd(raw: []const u8) !i32 {
     return v;
 }
 
-fn printCliError(err: anyerror) !void {
+fn printCliError(err: anyerror, level_prefix: bool) !void {
     switch (err) {
         error.HelpRequested => {},
-        error.UnsupportedOption => std.debug.print("unsupported option in current voidbox backend\n", .{}),
-        else => std.debug.print("argument error: {s}\n", .{@errorName(err)}),
+        error.UnsupportedOption => try printWithPrefix(level_prefix, "unsupported option in current voidbox backend\n", .{}),
+        else => try printWithPrefix(level_prefix, "argument error: {s}\n", .{@errorName(err)}),
     }
+}
+
+fn printWithPrefix(level_prefix: bool, comptime fmt: []const u8, args: anytype) !void {
+    if (level_prefix) {
+        std.debug.print("vb: ", .{});
+    }
+    std.debug.print(fmt, args);
 }
 
 fn printUsage() !void {
@@ -684,7 +717,7 @@ fn printUsage() !void {
     try out.print("  {s}--help{s}                   Show this help\n", .{ option, reset });
     try out.print("  {s}--version{s}                Print version\n", .{ option, reset });
     try out.print("  {s}--args{s} FD                Parse NUL-separated args from FD\n", .{ option, reset });
-    try out.print("  {s}--level-prefix{s}           Accepted for compatibility\n\n", .{ option, reset });
+    try out.print("  {s}--level-prefix{s}           Prefix diagnostics with 'vb:'\n\n", .{ option, reset });
 
     try out.print("{s}Namespaces{s}\n", .{ section, reset });
     try out.print("  {s}--unshare-user{s} | {s}--unshare-user-try{s}\n", .{ option, reset, option, reset });

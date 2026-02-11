@@ -19,8 +19,12 @@ pub fn prepare(
     security: SecurityOptions,
     namespace_fds: NamespaceFds,
 ) !void {
-    try checkErr(linux.setreuid(uid, uid), error.UID);
-    try checkErr(linux.setregid(gid, gid), error.GID);
+    if (linux.getgid() != gid) {
+        try checkErr(linux.setregid(gid, gid), error.GID);
+    }
+    if (linux.getuid() != uid) {
+        try checkErr(linux.setreuid(uid, uid), error.UID);
+    }
 
     try namespace_sequence.attachInitial(namespace_fds);
 

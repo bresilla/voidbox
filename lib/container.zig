@@ -29,6 +29,7 @@ const ChildProcessArgs = struct {
 
 const Container = @This();
 name: []const u8,
+instance_id: []const u8,
 cmd: []const []const u8,
 isolation: IsolationOptions,
 namespace_fds: NamespaceFds,
@@ -43,8 +44,12 @@ cgroup: Cgroup,
 allocator: std.mem.Allocator,
 
 pub fn init(run_args: JailConfig, allocator: std.mem.Allocator) !Container {
+    const instance_id = try makeInstanceId(allocator, run_args.name);
+    errdefer allocator.free(instance_id);
+
     return .{
         .name = run_args.name,
+        .instance_id = instance_id,
         .fs = Fs.init(run_args.rootfs_path, run_args.fs_actions),
         .cmd = run_args.cmd,
         .isolation = run_args.isolation,
@@ -53,9 +58,9 @@ pub fn init(run_args: JailConfig, allocator: std.mem.Allocator) !Container {
         .runtime = run_args.runtime,
         .security = run_args.security,
         .status = run_args.status,
-        .net = if (run_args.isolation.net) try Net.init(allocator, run_args.name) else null,
+        .net = if (run_args.isolation.net) try Net.init(allocator, instance_id) else null,
         .allocator = allocator,
-        .cgroup = try Cgroup.init(run_args.name, run_args.resources, allocator),
+        .cgroup = try Cgroup.init(instance_id, run_args.resources, allocator),
     };
 }
 
@@ -254,4 +259,14 @@ pub fn deinit(self: *Container) void {
     if (self.net) |*net| {
         net.deinit() catch log.err("net deinit failed", .{});
     }
+    self.allocator.free(self.instance_id);
+}
+
+fn makeInstanceId(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
+    const now_i128 = std.time.nanoTimestamp();
+    const now: u64 = @truncate(@as(u128, @bitCast(now_i128)));
+    const pid: u64 = @intCast(linux.getpid());
+    const hashed = std.hash.Wyhash.hash(0, name);
+    const token: u32 = @truncate(hashed ^ now ^ (pid << 32));
+    return std.fmt.allocPrint(allocator, "{x:0>8}", .{token});
 }

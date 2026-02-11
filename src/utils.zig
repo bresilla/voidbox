@@ -9,11 +9,14 @@ pub const BRIDGE_NAME = "voidbox0";
 pub fn checkErr(val: usize, err: anyerror) !void {
     const signed: isize = @bitCast(val);
     if (signed < 0 and signed > -4096) {
+        return err;
+    }
+}
+
+pub fn checkErrAllowBusy(val: usize, err: anyerror) !void {
+    const signed: isize = @bitCast(val);
+    if (signed < 0 and signed > -4096) {
         const e: std.os.linux.E = @enumFromInt(@as(usize, @intCast(-signed)));
-        // we ignore busy errors here because this fn is used
-        // to check the error of mount sycalls.
-        // busy is returned when the fs being mounted is currently in use
-        // which means that it was previously maounted
         if (e == .BUSY) return;
         return err;
     }

@@ -1,6 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
-const checkErr = @import("utils.zig").checkErr;
+const checkErrAllowBusy = @import("utils.zig").checkErrAllowBusy;
 const FsAction = @import("config.zig").FsAction;
 const OverlaySource = @import("config.zig").OverlaySource;
 const TmpfsMount = @import("config.zig").TmpfsMount;
@@ -390,7 +390,7 @@ fn mountPath(
         break :blk @as([*:0]const u8, &data_z);
     } else null;
 
-    try checkErr(linux.mount(special_ptr, &dir_z, fstype_ptr, flags, if (data_ptr) |p| @intFromPtr(p) else 0), err_ty);
+    try checkErrAllowBusy(linux.mount(special_ptr, &dir_z, fstype_ptr, flags, if (data_ptr) |p| @intFromPtr(p) else 0), err_ty);
 }
 
 test "trimPath strips leading slashes" {

@@ -51,15 +51,23 @@ pub fn exec(self: *LinkGet) !LinkMessage {
 fn recv(self: *LinkGet) !LinkMessage {
     var buff: [512]u8 = undefined;
     const n = try self.nl.recv(&buff);
+    if (n < @sizeOf(linux.nlmsghdr)) return error.InvalidResponse;
+
     var start: usize = 0;
     var link_info = LinkMessage.init(self.nl.allocator, .create); // req_type doesn't matter here
+    errdefer link_info.deinit();
 
     const header = std.mem.bytesAsValue(linux.nlmsghdr, buff[0..@sizeOf(linux.nlmsghdr)]);
     if (header.type == .ERROR) {
+        if (n < @sizeOf(RtNetLink.NlMsgError)) return error.InvalidResponse;
         const response = std.mem.bytesAsValue(RtNetLink.NlMsgError, buff[0..]);
         try RtNetLink.handle_ack(response.*);
         unreachable;
     }
+    if (header.len < @sizeOf(linux.nlmsghdr) + @sizeOf(linux.ifinfomsg) or header.len > n) {
+        return error.InvalidResponse;
+    }
+
     start += @sizeOf(linux.nlmsghdr);
     link_info.hdr = header.*;
 
@@ -69,10 +77,16 @@ fn recv(self: *LinkGet) !LinkMessage {
     link_info.msg.header = ifinfo.*;
 
     log.info("ifinfo: {}", .{ifinfo});
-    while (start < n) {
+    while (start + @sizeOf(linux.rtattr) <= header.len) {
         const rtattr = std.mem.bytesAsValue(linux.rtattr, buff[start .. start + @sizeOf(linux.rtattr)]);
+        if (rtattr.len < @sizeOf(linux.rtattr)) return error.InvalidResponse;
+        if (start + rtattr.len > header.len) return error.InvalidResponse;
         switch (rtattr.type.link) {
             .IFNAME => {
+                if (rtattr.len == @sizeOf(linux.rtattr)) {
+                    start += nalign(rtattr.len);
+                    continue;
+                }
                 const value = buff[start + @sizeOf(linux.rtattr) .. start + rtattr.len - 1]; // skip null terminating byte
                 const ifname = try self.allocator.alloc(u8, value.len);
                 @memcpy(ifname, value);

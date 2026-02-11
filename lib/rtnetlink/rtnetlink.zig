@@ -11,12 +11,12 @@ fd: std.posix.socket_t,
 allocator: std.mem.Allocator,
 
 pub fn init(allocator: std.mem.Allocator) !Self {
-    const fd: i32 = @intCast(linux.socket(linux.AF.NETLINK, linux.SOCK.RAW, linux.NETLINK.ROUTE));
+    const fd = try std.posix.socket(linux.AF.NETLINK, linux.SOCK.RAW, linux.NETLINK.ROUTE);
     const kernel_addr = linux.sockaddr.nl{ .pid = 0, .groups = 0 };
-    const res = linux.bind(fd, @ptrCast(&kernel_addr), @sizeOf(@TypeOf(kernel_addr)));
-    if (std.posix.errno(res) != .SUCCESS) {
+    std.posix.bind(fd, @ptrCast(&kernel_addr), @sizeOf(@TypeOf(kernel_addr))) catch {
+        std.posix.close(fd);
         return error.BindFailed;
-    }
+    };
 
     return .{ .allocator = allocator, .fd = fd };
 }
@@ -40,7 +40,7 @@ pub fn recv(self: *Self, buff: []u8) !usize {
 pub fn recv_ack(self: *Self) !void {
     var buff: [512]u8 = std.mem.zeroes([512]u8);
     const n = try std.posix.recv(self.fd, &buff, 0);
-    if (n == 0) {
+    if (n < @sizeOf(linux.nlmsghdr)) {
         return error.InvalidResponse;
     }
 
@@ -48,9 +48,12 @@ pub fn recv_ack(self: *Self) !void {
     if (header.type == .DONE) {
         return;
     } else if (header.type == .ERROR) { // ACK/NACK response
+        if (n < @sizeOf(NlMsgError)) return error.InvalidResponse;
         const response = std.mem.bytesAsValue(NlMsgError, buff[0..]);
         return handle_ack(response.*);
     }
+
+    return error.InvalidResponse;
 }
 
 pub const NlMsgError = struct {

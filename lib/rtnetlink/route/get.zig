@@ -48,6 +48,7 @@ fn recv(self: *Get) ![]RouteMessage {
         while (d < n) {
             const msg = (try self.parseMessage(buff[d..])) orelse break :outer;
             try response.append(self.allocator, msg);
+            if (msg.hdr.len == 0) return error.InvalidResponse;
             d += msg.hdr.len;
         }
         n = try self.nl.recv(&buff);
@@ -56,13 +57,20 @@ fn recv(self: *Get) ![]RouteMessage {
 }
 
 fn parseMessage(self: *Get, buff: []u8) !?RouteMessage {
+    if (buff.len < @sizeOf(linux.nlmsghdr)) return error.InvalidResponse;
+
     const header = std.mem.bytesAsValue(linux.nlmsghdr, buff[0..@sizeOf(linux.nlmsghdr)]);
     if (header.type == .ERROR) {
+        if (buff.len < @sizeOf(NetLink.NlMsgError)) return error.InvalidResponse;
         const response = std.mem.bytesAsValue(NetLink.NlMsgError, buff[0..]);
         try NetLink.handle_ack(response.*);
         unreachable;
     } else if (header.type == .DONE) {
         return null;
+    }
+
+    if (header.len < @sizeOf(linux.nlmsghdr) + @sizeOf(RouteMessage.RouteHeader) or header.len > buff.len) {
+        return error.InvalidResponse;
     }
 
     var msg = RouteMessage.init(self.allocator, .create);
@@ -75,14 +83,18 @@ fn parseMessage(self: *Get, buff: []u8) !?RouteMessage {
     msg.msg.hdr = hdr.*;
 
     var start: usize = @sizeOf(RouteMessage.RouteHeader) + @sizeOf(linux.nlmsghdr);
-    while (start < len) {
-        const attr = std.mem.bytesAsValue(Attr, buff[start..]);
+    while (start + @sizeOf(Attr) <= len) {
+        const attr = std.mem.bytesAsValue(Attr, buff[start .. start + @sizeOf(Attr)]);
+        if (attr.len < @sizeOf(Attr)) return error.InvalidResponse;
+        if (start + attr.len > len) return error.InvalidResponse;
         // TODO: parse more attrs
         switch (attr.type) {
             .Gateway => {
+                if (attr.len < @sizeOf(Attr) + 4) return error.InvalidResponse;
                 try msg.addAttr(.{ .gateway = buff[start + @sizeOf(Attr) .. start + attr.len][0..4].* });
             },
             .Oif => {
+                if (attr.len < @sizeOf(Attr) + @sizeOf(u32)) return error.InvalidResponse;
                 const value = std.mem.bytesAsValue(u32, buff[start + @sizeOf(Attr) .. start + attr.len]);
                 try msg.addAttr(.{ .output_if = value.* });
             },

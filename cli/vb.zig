@@ -313,6 +313,13 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
             try fs_actions.append(allocator, .{ .bind = .{ .src = src, .dest = dest } });
             continue;
         }
+        if (std.mem.eql(u8, arg, "--bind-fd")) {
+            const fd = try parseFd(try nextArg(args, &i, arg));
+            const dest = try nextArg(args, &i, arg);
+            const src = try std.fmt.allocPrint(allocator, "/proc/self/fd/{d}", .{fd});
+            try fs_actions.append(allocator, .{ .bind = .{ .src = src, .dest = dest } });
+            continue;
+        }
         if (std.mem.eql(u8, arg, "--bind-try")) {
             const src = try nextArg(args, &i, arg);
             const dest = try nextArg(args, &i, arg);
@@ -334,6 +341,13 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
         if (std.mem.eql(u8, arg, "--ro-bind")) {
             const src = try nextArg(args, &i, arg);
             const dest = try nextArg(args, &i, arg);
+            try fs_actions.append(allocator, .{ .ro_bind = .{ .src = src, .dest = dest } });
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--ro-bind-fd")) {
+            const fd = try parseFd(try nextArg(args, &i, arg));
+            const dest = try nextArg(args, &i, arg);
+            const src = try std.fmt.allocPrint(allocator, "/proc/self/fd/{d}", .{fd});
             try fs_actions.append(allocator, .{ .ro_bind = .{ .src = src, .dest = dest } });
             continue;
         }
@@ -773,6 +787,7 @@ fn printUsage() !void {
     try out.print("{s}Filesystem{s}\n", .{ section, reset });
     try out.print("  {s}--perms{s} OCTAL | {s}--size{s} BYTES\n", .{ option, reset, option, reset });
     try out.print("  {s}--bind{s} SRC DEST | {s}--bind-try{s} SRC DEST\n", .{ option, reset, option, reset });
+    try out.print("  {s}--bind-fd{s} FD DEST | {s}--ro-bind-fd{s} FD DEST\n", .{ option, reset, option, reset });
     try out.print("  {s}--dev-bind{s} SRC DEST | {s}--dev-bind-try{s} SRC DEST\n", .{ option, reset, option, reset });
     try out.print("  {s}--ro-bind{s} SRC DEST | {s}--ro-bind-try{s} SRC DEST | {s}--remount-ro{s} DEST\n", .{ option, reset, option, reset, option, reset });
     try out.print("  {s}--proc{s} DEST | {s}--dev{s} DEST | {s}--tmpfs{s} DEST | {s}--mqueue{s} DEST | {s}--dir{s} DEST\n", .{ option, reset, option, reset, option, reset, option, reset, option, reset });
@@ -890,4 +905,23 @@ test "parseBwrapArgs keeps fs try actions" {
     try std.testing.expect(parsed.cfg.fs_actions[0] == .bind_try);
     try std.testing.expect(parsed.cfg.fs_actions[1] == .dev_bind_try);
     try std.testing.expect(parsed.cfg.fs_actions[2] == .ro_bind_try);
+}
+
+test "parseBwrapArgs maps bind-fd options to proc fd sources" {
+    const allocator = std.testing.allocator;
+    const parsed = try parseBwrapArgs(allocator, &.{
+        "--bind-fd",    "9",         "/mnt/a",
+        "--ro-bind-fd", "10",        "/mnt/b",
+        "--",           "/bin/true",
+    });
+    defer allocator.free(parsed.cmd);
+    defer allocator.free(parsed.cfg.fs_actions);
+    defer allocator.free(parsed.cfg.fs_actions[0].bind.src);
+    defer allocator.free(parsed.cfg.fs_actions[1].ro_bind.src);
+
+    try std.testing.expectEqual(@as(usize, 2), parsed.cfg.fs_actions.len);
+    try std.testing.expect(parsed.cfg.fs_actions[0] == .bind);
+    try std.testing.expect(parsed.cfg.fs_actions[1] == .ro_bind);
+    try std.testing.expectEqualStrings("/proc/self/fd/9", parsed.cfg.fs_actions[0].bind.src);
+    try std.testing.expectEqualStrings("/proc/self/fd/10", parsed.cfg.fs_actions[1].ro_bind.src);
 }

@@ -95,7 +95,15 @@ pub fn spawn(self: *Container) !linux.pid_t {
         .gid = self.runtime.gid orelse if (self.isolation.user or self.namespace_fds.user != null) 0 else linux.getgid(),
     };
     try checkErr(linux.pipe(&childp_args.pipe), error.Pipe);
+    var parent_read_open = true;
+    var parent_write_open = true;
+    errdefer {
+        if (parent_read_open) _ = linux.close(childp_args.pipe[0]);
+        if (parent_write_open) _ = linux.close(childp_args.pipe[1]);
+    }
+
     var stack = try self.allocator.alloc(u8, 1024 * 1024);
+    defer self.allocator.free(stack);
     var ctid: i32 = 0;
     var ptid: i32 = 0;
     const clone_flags = namespace.computeCloneFlags(self.isolation);
@@ -106,6 +114,7 @@ pub fn spawn(self: *Container) !linux.pid_t {
     if (pid_signed <= 0) return error.CloneFailed;
     const pid: linux.pid_t = @intCast(pid_signed);
     _ = linux.close(childp_args.pipe[0]);
+    parent_read_open = false;
 
     // move one of the veth pairs to
     // the child process network namespace
@@ -121,6 +130,7 @@ pub fn spawn(self: *Container) !linux.pid_t {
     if (self.isolation.user) {
         namespace.writeUserRootMappings(self.allocator, pid) catch |err| {
             _ = linux.close(childp_args.pipe[1]);
+            parent_write_open = false;
             std.posix.kill(pid, std.posix.SIG.KILL) catch {};
             _ = std.posix.waitpid(pid, 0);
             return err;
@@ -130,6 +140,8 @@ pub fn spawn(self: *Container) !linux.pid_t {
     // signal done by writing to pipe
     const buff = [_]u8{0};
     _ = try std.posix.write(childp_args.pipe[1], &buff);
+    _ = linux.close(childp_args.pipe[1]);
+    parent_write_open = false;
 
     return @intCast(pid);
 }

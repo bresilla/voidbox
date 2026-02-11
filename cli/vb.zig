@@ -215,6 +215,22 @@ fn parseBwrapArgs(allocator: std.mem.Allocator, raw: []const []const u8) !Parsed
             cfg.namespace_fds.pid = try parseFd(try nextArg(args, &i, arg));
             continue;
         }
+        if (std.mem.eql(u8, arg, "--netns")) {
+            cfg.namespace_fds.net = try parseFd(try nextArg(args, &i, arg));
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--mntns")) {
+            cfg.namespace_fds.mount = try parseFd(try nextArg(args, &i, arg));
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--utsns")) {
+            cfg.namespace_fds.uts = try parseFd(try nextArg(args, &i, arg));
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--ipcns")) {
+            cfg.namespace_fds.ipc = try parseFd(try nextArg(args, &i, arg));
+            continue;
+        }
         if (std.mem.eql(u8, arg, "--disable-userns")) {
             cfg.security.disable_userns = true;
             continue;
@@ -725,6 +741,7 @@ fn printUsage() !void {
     try out.print("  {s}--unshare-uts{s} | {s}--unshare-cgroup{s} | {s}--unshare-cgroup-try{s}\n", .{ option, reset, option, reset, option, reset });
     try out.print("  {s}--unshare-all{s}\n", .{ option, reset });
     try out.print("  {s}--userns{s} FD | {s}--userns2{s} FD | {s}--pidns{s} FD\n", .{ option, reset, option, reset, option, reset });
+    try out.print("  {s}--netns{s} FD | {s}--mntns{s} FD | {s}--utsns{s} FD | {s}--ipcns{s} FD\n", .{ option, reset, option, reset, option, reset, option, reset });
     try out.print("  {s}--uid{s} UID | {s}--gid{s} GID | {s}--hostname{s} HOST\n\n", .{ option, reset, option, reset, option, reset });
 
     try out.print("{s}Process And Env{s}\n", .{ section, reset });

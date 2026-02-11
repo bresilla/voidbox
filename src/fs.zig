@@ -18,10 +18,7 @@ pub fn setup(self: *Fs, mount_fs: bool) !void {
 
     try mounts.makeRootPrivate();
 
-    if (self.actions.len == 0) {
-        try mounts.setupDefault();
-        return;
-    }
+    if (self.actions.len == 0) return;
 
     try fs_actions.execute(self.actions);
 }

@@ -204,6 +204,13 @@ export fn childFn(a: usize) u8 {
         childExit(code);
     }
 
+    if (arg.container.isolation.user) {
+        const code = arg.container.execAsPid1(arg.uid, arg.gid) catch {
+            childExit(127);
+        };
+        childExit(code);
+    }
+
     arg.container.execCmd(arg.uid, arg.gid) catch {
         childExit(127);
     };

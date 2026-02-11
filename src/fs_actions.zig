@@ -451,3 +451,11 @@ test "dev_bind_try skips missing source without failing" {
 
     try execute(&actions);
 }
+
+test "ro_bind_try skips missing source without failing" {
+    const actions = [_]FsAction{
+        .{ .ro_bind_try = .{ .src = "/definitely/not/a/real/path", .dest = "/tmp/voidbox-ro-bind-try-skip" } },
+    };
+
+    try execute(&actions);
+}

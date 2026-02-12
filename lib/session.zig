@@ -94,12 +94,14 @@ pub fn wait(session: *Session) !RunOutcome {
 
 fn waitForFd(fd: i32) !void {
     var buf: [1]u8 = undefined;
-    _ = try std.posix.read(fd, &buf);
+    const n = try std.posix.read(fd, &buf);
+    if (n != 1) return error.SyncFdClosed;
 }
 
 fn signalFd(fd: i32) !void {
     const buf = [_]u8{1};
-    _ = try std.posix.write(fd, &buf);
+    const n = try std.posix.write(fd, &buf);
+    if (n != 1) return error.SyncFdWriteShort;
 }
 
 fn openOrCreateAndLockFile(path: []const u8) !std.fs.File {
@@ -136,6 +138,14 @@ test "waitForFd consumes supervisor unblock byte" {
     const one = [_]u8{1};
     _ = try std.posix.write(pipefds[1], &one);
     try waitForFd(pipefds[0]);
+}
+
+test "waitForFd errors on closed writer" {
+    const pipefds = try std.posix.pipe();
+    defer std.posix.close(pipefds[0]);
+    std.posix.close(pipefds[1]);
+
+    try std.testing.expectError(error.SyncFdClosed, waitForFd(pipefds[0]));
 }
 
 test "openOrCreateAndLockFile acquires exclusive lock" {

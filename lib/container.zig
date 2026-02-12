@@ -30,6 +30,7 @@ const ChildProcessArgs = struct {
 
 const Container = @This();
 var pid1_forward_target: c.sig_atomic_t = 0;
+const FORWARDED_SIGNALS = [_]c_int{ c.SIGTERM, c.SIGINT, c.SIGHUP, c.SIGQUIT, c.SIGUSR1, c.SIGUSR2 };
 name: []const u8,
 instance_id: []const u8,
 cmd: []const []const u8,
@@ -273,6 +274,7 @@ fn execAsPid1(self: *Container, uid: linux.uid_t, gid: linux.gid_t, setup_ready_
         childExit(0);
     }
 
+    std.posix.setpgid(child_pid, child_pid) catch {};
     try installPid1SignalForwarding(child_pid);
 
     const code = try waitMainChildAsPid1(child_pid);
@@ -284,18 +286,19 @@ fn execAsPid1(self: *Container, uid: linux.uid_t, gid: linux.gid_t, setup_ready_
 fn installPid1SignalForwarding(child_pid: linux.pid_t) !void {
     pid1_forward_target = @intCast(child_pid);
 
-    if (c.signal(c.SIGTERM, pid1ForwardSignalHandler) == c.SIG_ERR) {
-        return error.SignalInstallFailed;
-    }
-    if (c.signal(c.SIGINT, pid1ForwardSignalHandler) == c.SIG_ERR) {
-        return error.SignalInstallFailed;
+    for (FORWARDED_SIGNALS) |sig| {
+        if (c.signal(sig, pid1ForwardSignalHandler) == c.SIG_ERR) {
+            return error.SignalInstallFailed;
+        }
     }
 }
 
 fn pid1ForwardSignalHandler(sig: c_int) callconv(.c) void {
     const target: linux.pid_t = @intCast(pid1_forward_target);
     if (target <= 0) return;
-    _ = linux.syscall2(.kill, @as(usize, @intCast(target)), @as(usize, @intCast(sig)));
+    if (c.kill(-target, sig) == -1) {
+        _ = c.kill(target, sig);
+    }
 }
 
 fn waitMainChildAsPid1(main_child_pid: linux.pid_t) !u8 {
@@ -347,4 +350,21 @@ fn makeInstanceId(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
     const hashed = std.hash.Wyhash.hash(0, name);
     const token: u32 = @truncate(hashed ^ now ^ (pid << 32));
     return std.fmt.allocPrint(allocator, "{x:0>8}", .{token});
+}
+
+test "forwarded signal set includes common termination signals" {
+    var has_term = false;
+    var has_int = false;
+    var has_hup = false;
+    var has_quit = false;
+    for (FORWARDED_SIGNALS) |sig| {
+        if (sig == c.SIGTERM) has_term = true;
+        if (sig == c.SIGINT) has_int = true;
+        if (sig == c.SIGHUP) has_hup = true;
+        if (sig == c.SIGQUIT) has_quit = true;
+    }
+    try std.testing.expect(has_term);
+    try std.testing.expect(has_int);
+    try std.testing.expect(has_hup);
+    try std.testing.expect(has_quit);
 }

@@ -76,7 +76,12 @@ fn getDefaultGatewayIfNameCached(self: *Net) ![]const u8 {
     defer default_ifname_mutex.unlock();
 
     if (default_ifname_cache_len != 0) {
-        return default_ifname_cache[0..default_ifname_cache_len];
+        const cached = default_ifname_cache[0..default_ifname_cache_len];
+        if (self.linkExists(cached)) {
+            return cached;
+        }
+        log.warn("cached default interface {s} no longer exists; refreshing route lookup", .{cached});
+        default_ifname_cache_len = 0;
     }
 
     const default_ifname = try self.getDefaultGatewayIfName();

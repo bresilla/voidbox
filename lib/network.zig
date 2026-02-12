@@ -3,8 +3,6 @@ const log = std.log;
 const linux = std.os.linux;
 const utils = @import("utils.zig");
 const checkErr = utils.checkErr;
-const INFO_PATH = utils.INFO_PATH;
-const NETNS_PATH = utils.NETNS_PATH;
 const ip = @import("ip.zig");
 
 const NetLink = @import("rtnetlink/rtnetlink.zig");

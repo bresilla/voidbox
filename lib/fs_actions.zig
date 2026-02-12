@@ -366,7 +366,7 @@ fn writeDataSource(instance_id: []const u8, data: []const u8, index: usize) ![]c
         try ensurePath(p);
     }
 
-    var file = try std.fs.cwd().createFile(trimPath(path), .{ .truncate = true });
+    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true });
     defer file.close();
     errdefer std.fs.deleteFileAbsolute(path) catch {};
     try file.writeAll(data);
@@ -381,7 +381,7 @@ fn writeDataSourceFromFd(instance_id: []const u8, fd: i32, index: usize) ![]cons
         try ensurePath(p);
     }
 
-    var out_file = try std.fs.cwd().createFile(trimPath(path), .{ .truncate = true });
+    var out_file = try std.fs.createFileAbsolute(path, .{ .truncate = true });
     defer out_file.close();
     errdefer std.fs.deleteFileAbsolute(path) catch {};
     var in_file = std.fs.File{ .handle = fd };
@@ -421,6 +421,14 @@ fn formatTmpfsOpts(buffer: []u8, tmpfs: @import("config.zig").TmpfsMount) ![]con
 fn ensurePath(path: []const u8) !void {
     const normalized = trimPath(path);
     if (normalized.len == 0) return;
+
+    if (std.mem.startsWith(u8, path, "/")) {
+        var root = try std.fs.openDirAbsolute("/", .{});
+        defer root.close();
+        try root.makePath(normalized);
+        return;
+    }
+
     try std.fs.cwd().makePath(normalized);
 }
 
@@ -484,6 +492,15 @@ test "findOverlaySource resolves source by key" {
 test "sourceExists handles existing and missing paths" {
     try std.testing.expect(sourceExists("/"));
     try std.testing.expect(!sourceExists("/definitely/not/a/real/path"));
+}
+
+test "ensurePath creates absolute directories" {
+    const path = "/tmp/voidbox-ensure-path-abs-test/a/b";
+    std.fs.deleteTreeAbsolute("/tmp/voidbox-ensure-path-abs-test") catch {};
+    defer std.fs.deleteTreeAbsolute("/tmp/voidbox-ensure-path-abs-test") catch {};
+
+    try ensurePath(path);
+    try std.testing.expect(sourceExists(path));
 }
 
 test "effectiveTmpfs applies size and mode modifiers" {

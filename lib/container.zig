@@ -106,7 +106,11 @@ pub fn spawn(self: *Container) !linux.pid_t {
         .gid = self.runtime.gid orelse if (self.isolation.user or self.namespace_fds.user != null) 0 else linux.getgid(),
     };
     try checkErr(linux.pipe(&childp_args.pipe), error.Pipe);
-    try checkErr(linux.pipe(&childp_args.setup_pipe), error.Pipe);
+    checkErr(linux.pipe(&childp_args.setup_pipe), error.Pipe) catch |err| {
+        _ = linux.close(childp_args.pipe[0]);
+        _ = linux.close(childp_args.pipe[1]);
+        return err;
+    };
     var parent_read_open = true;
     var parent_write_open = true;
     var parent_setup_read_open = true;

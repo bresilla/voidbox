@@ -1078,6 +1078,63 @@ test "integration stress sequential netless launches" {
     }
 }
 
+test "integration status callback preserves lifecycle ordering" {
+    if (!integrationTestsEnabled()) return error.SkipZigTest;
+
+    const Ctx = struct {
+        count: usize = 0,
+        kinds: [8]StatusEventKind = undefined,
+    };
+
+    const Callback = struct {
+        fn onEvent(ctx_ptr: ?*anyopaque, event: StatusEvent) !void {
+            const ctx: *Ctx = @ptrCast(@alignCast(ctx_ptr.?));
+            if (ctx.count < ctx.kinds.len) {
+                ctx.kinds[ctx.count] = event.kind;
+                ctx.count += 1;
+            }
+        }
+    };
+
+    var ctx = Ctx{};
+    const cfg: JailConfig = .{
+        .name = "itest-status-order",
+        .rootfs_path = "/",
+        .cmd = &.{ "/bin/sh", "-c", "exit 0" },
+        .status = .{ .on_event = Callback.onEvent, .callback_ctx = &ctx },
+        .isolation = .{
+            .user = false,
+            .net = false,
+            .mount = false,
+            .pid = false,
+            .uts = false,
+            .ipc = false,
+            .cgroup = false,
+        },
+    };
+
+    const outcome = launch(cfg, std.testing.allocator) catch |err| switch (err) {
+        error.SpawnFailed => return error.SkipZigTest,
+        else => return err,
+    };
+    try std.testing.expectEqual(@as(u8, 0), outcome.exit_code);
+
+    var spawned_at: ?usize = null;
+    var setup_at: ?usize = null;
+    var exited_at: ?usize = null;
+    for (ctx.kinds[0..ctx.count], 0..) |kind, i| {
+        if (kind == .spawned and spawned_at == null) spawned_at = i;
+        if (kind == .setup_finished and setup_at == null) setup_at = i;
+        if (kind == .exited and exited_at == null) exited_at = i;
+    }
+
+    try std.testing.expect(spawned_at != null);
+    try std.testing.expect(setup_at != null);
+    try std.testing.expect(exited_at != null);
+    try std.testing.expect(spawned_at.? < setup_at.?);
+    try std.testing.expect(setup_at.? < exited_at.?);
+}
+
 fn integrationTestsEnabled() bool {
     const value = std.process.getEnvVarOwned(std.heap.page_allocator, "VOIDBOX_RUN_INTEGRATION") catch return false;
     defer std.heap.page_allocator.free(value);

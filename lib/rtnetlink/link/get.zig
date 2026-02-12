@@ -18,6 +18,10 @@ fn hasActiveLinkFilters(opts: Options) bool {
     return opts.name != null or opts.index != null;
 }
 
+fn shouldReturnParsedAfterPacket(stop_on_first_link: bool, parsed_present: bool) bool {
+    return stop_on_first_link and parsed_present;
+}
+
 msg: LinkMessage,
 nl: *RtNetLink,
 opts: Options,
@@ -107,7 +111,9 @@ fn recv(self: *LinkGet, stop_on_first_link: bool) !LinkMessage {
 
         packet_count += 1;
 
-        if (parsed) |msg| return msg;
+        if (shouldReturnParsedAfterPacket(stop_on_first_link, parsed != null)) {
+            return parsed.?;
+        }
     }
 }
 
@@ -358,6 +364,13 @@ test "hasActiveLinkFilters detects active selector options" {
     try std.testing.expect(!hasActiveLinkFilters(.{}));
     try std.testing.expect(hasActiveLinkFilters(.{ .name = "eth0" }));
     try std.testing.expect(hasActiveLinkFilters(.{ .index = 2 }));
+}
+
+test "shouldReturnParsedAfterPacket requires filter and parsed value" {
+    try std.testing.expect(!shouldReturnParsedAfterPacket(false, false));
+    try std.testing.expect(!shouldReturnParsedAfterPacket(false, true));
+    try std.testing.expect(!shouldReturnParsedAfterPacket(true, false));
+    try std.testing.expect(shouldReturnParsedAfterPacket(true, true));
 }
 
 test "linkFrameCountExceeded enforces frame cap" {

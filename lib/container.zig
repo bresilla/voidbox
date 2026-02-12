@@ -276,10 +276,10 @@ fn execAsPid1(self: *Container, uid: linux.uid_t, gid: linux.gid_t, setup_ready_
 
     std.posix.setpgid(child_pid, child_pid) catch {};
     try installPid1SignalForwarding(child_pid);
+    defer resetPid1SignalForwarding();
 
     const code = try waitMainChildAsPid1(child_pid);
     reapChildrenNonBlocking();
-    pid1_forward_target = 0;
     return code;
 }
 
@@ -291,6 +291,13 @@ fn installPid1SignalForwarding(child_pid: linux.pid_t) !void {
             return error.SignalInstallFailed;
         }
     }
+}
+
+fn resetPid1SignalForwarding() void {
+    for (FORWARDED_SIGNALS) |sig| {
+        _ = c.signal(sig, c.SIG_DFL);
+    }
+    pid1_forward_target = 0;
 }
 
 fn pid1ForwardSignalHandler(sig: c_int) callconv(.c) void {

@@ -1189,9 +1189,11 @@ test "integration stress sequential session spawn-wait cycles" {
             error.SpawnFailed => return error.SkipZigTest,
             else => return err,
         };
-        defer session.deinit();
-
-        const outcome = try wait(&session);
+        const outcome = wait(&session) catch |err| {
+            session.deinit();
+            return err;
+        };
+        session.deinit();
         try std.testing.expectEqual(@as(u8, 0), outcome.exit_code);
     }
 }

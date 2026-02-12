@@ -104,6 +104,18 @@ fn ackFrameCountExceeded(current_count: usize) bool {
     return current_count >= MAX_ACK_FRAMES;
 }
 
+fn countOpenFds() !usize {
+    var dir = try std.fs.openDirAbsolute("/proc/self/fd", .{ .iterate = true });
+    defer dir.close();
+
+    var iter = dir.iterate();
+    var count: usize = 0;
+    while (try iter.next()) |_| {
+        count += 1;
+    }
+    return count;
+}
+
 pub fn linkAdd(self: *Self, options: link.LinkAdd.Options) !void {
     var la = link.LinkAdd.init(self.allocator, self, options);
     defer la.msg.deinit();
@@ -194,6 +206,19 @@ test "align4 rounds values to 4-byte boundary" {
 test "ackFrameCountExceeded enforces ack frame cap" {
     try std.testing.expect(!ackFrameCountExceeded(MAX_ACK_FRAMES - 1));
     try std.testing.expect(ackFrameCountExceeded(MAX_ACK_FRAMES));
+}
+
+test "repeated rtnetlink init/deinit keeps fd count stable" {
+    const before = try countOpenFds();
+
+    var i: usize = 0;
+    while (i < 64) : (i += 1) {
+        var nl = try Self.init(std.testing.allocator);
+        nl.deinit();
+    }
+
+    const after = try countOpenFds();
+    try std.testing.expectEqual(before, after);
 }
 
 test "handle_ack_code treats zero as success" {

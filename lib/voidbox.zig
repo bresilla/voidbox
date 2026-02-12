@@ -1327,6 +1327,32 @@ test "integration stress parallel launches with namespace toggles" {
     try std.testing.expect(c1.ok);
 }
 
+test "integration launch supports pid namespace as_pid_1 mode" {
+    if (!integrationTestsEnabled()) return error.SkipZigTest;
+
+    const cfg: JailConfig = .{
+        .name = "itest-as-pid1",
+        .rootfs_path = "/",
+        .cmd = &.{ "/bin/sh", "-c", "exit 0" },
+        .isolation = .{
+            .user = false,
+            .net = false,
+            .mount = false,
+            .pid = true,
+            .uts = false,
+            .ipc = false,
+            .cgroup = false,
+        },
+        .runtime = .{ .as_pid_1 = true },
+    };
+
+    const outcome = launch(cfg, std.testing.allocator) catch |err| switch (err) {
+        error.SpawnFailed => return error.SkipZigTest,
+        else => return err,
+    };
+    try std.testing.expectEqual(@as(u8, 0), outcome.exit_code);
+}
+
 fn integrationTestsEnabled() bool {
     const value = std.process.getEnvVarOwned(std.heap.page_allocator, "VOIDBOX_RUN_INTEGRATION") catch return false;
     defer std.heap.page_allocator.free(value);

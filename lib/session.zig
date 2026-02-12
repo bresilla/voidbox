@@ -96,6 +96,7 @@ fn waitForFd(fd: i32) !void {
     var buf: [1]u8 = undefined;
     const n = try readOneByte(fd, &buf);
     if (n != 1) return error.SyncFdClosed;
+    if (buf[0] != 1) return error.SyncFdProtocolViolation;
 }
 
 fn signalFd(fd: i32) !void {
@@ -150,6 +151,16 @@ test "waitForFd consumes supervisor unblock byte" {
     const one = [_]u8{1};
     _ = try std.posix.write(pipefds[1], &one);
     try waitForFd(pipefds[0]);
+}
+
+test "waitForFd rejects unexpected sync byte" {
+    const pipefds = try std.posix.pipe();
+    defer std.posix.close(pipefds[0]);
+    defer std.posix.close(pipefds[1]);
+
+    const zero = [_]u8{0};
+    _ = try std.posix.write(pipefds[1], &zero);
+    try std.testing.expectError(error.SyncFdProtocolViolation, waitForFd(pipefds[0]));
 }
 
 test "waitForFd errors on closed writer" {

@@ -199,8 +199,6 @@ pub fn moveVethToNs(self: *Net, pid: linux.pid_t) !void {
 pub fn setupContainerVethIf(self: *Net) !void {
     const veth_name = try std.fmt.allocPrint(self.allocator, "veth1-{s}", .{self.cid});
     defer self.allocator.free(veth_name);
-    const pid_netns_path = try std.fmt.allocPrint(self.allocator, "/proc/{}/ns/net", .{linux.getpid()});
-    defer self.allocator.free(pid_netns_path);
 
     // need to create new netlink connection because
     // the existing one is tied to the parent namespace

@@ -2,7 +2,6 @@ const std = @import("std");
 const log = std.log;
 const linux = std.os.linux;
 const utils = @import("utils.zig");
-const checkErr = utils.checkErr;
 const ip = @import("ip.zig");
 
 const NetLink = @import("rtnetlink/rtnetlink.zig");
@@ -38,11 +37,6 @@ pub fn setUpBridge(self: *Net) !void {
     defer bridge.deinit();
     try self.nl.linkSet(.{ .index = bridge.msg.header.index, .up = true });
     try self.nl.addrAdd(.{ .index = bridge.msg.header.index, .addr = .{ 10, 0, 0, 1 }, .prefix_len = 24 }); //
-}
-
-fn setNetNs(fd: linux.fd_t) !void {
-    const res = linux.syscall2(.setns, @intCast(fd), linux.CLONE.NEWNET);
-    try checkErr(res, error.NetNsFailed);
 }
 
 /// enables snat on default interface

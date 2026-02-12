@@ -102,14 +102,18 @@ fn getDefaultGatewayIfName(self: *Net) ![]const u8 {
     }
 
     var if_index: ?u32 = null;
-    var has_gtw = false;
     for (res) |*msg| {
-        if (has_gtw) continue;
+        var msg_has_gateway = false;
+        var msg_if_index: ?u32 = null;
         for (msg.msg.attrs.items) |attr| {
             switch (attr) {
-                .gateway => has_gtw = true,
-                .output_if => |val| if_index = val,
+                .gateway => msg_has_gateway = true,
+                .output_if => |val| msg_if_index = val,
             }
+        }
+        if (msg_has_gateway and msg_if_index != null) {
+            if_index = msg_if_index;
+            break;
         }
     }
     const idx = if_index orelse return error.NotFound;

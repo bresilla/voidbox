@@ -5,6 +5,7 @@ const NetLink = @import("../rtnetlink.zig");
 const RouteMessage = @import("route.zig");
 const Attr = @import("attrs.zig").RtAttr;
 const nalign = @import("../utils.zig").nalign;
+const MAX_ROUTE_MESSAGES = 4096;
 
 const Get = @This();
 
@@ -47,6 +48,7 @@ fn recv(self: *Get) ![]RouteMessage {
         var d: usize = 0;
         while (d < n) {
             const msg = (try self.parseMessage(buff[d..n])) orelse break :outer;
+            if (routeCountExceeded(response.items.len)) return error.TooManyRoutes;
             try response.append(self.allocator, msg);
             if (msg.hdr.len == 0) return error.InvalidResponse;
             const frame_len = nalign(msg.hdr.len);
@@ -121,6 +123,10 @@ fn hasOnlyZeroPadding(bytes: []const u8) bool {
         if (b != 0) return false;
     }
     return true;
+}
+
+fn routeCountExceeded(current_count: usize) bool {
+    return current_count >= MAX_ROUTE_MESSAGES;
 }
 
 test "parseMessage returns null for DONE frame" {
@@ -291,4 +297,9 @@ test "parseMessage rejects unexpected netlink message type" {
     @memcpy(buff[route_off .. route_off + @sizeOf(RouteMessage.RouteHeader)], std.mem.asBytes(&route_hdr));
 
     try std.testing.expectError(error.InvalidResponse, get.parseMessage(&buff));
+}
+
+test "routeCountExceeded enforces hard cap" {
+    try std.testing.expect(!routeCountExceeded(MAX_ROUTE_MESSAGES - 1));
+    try std.testing.expect(routeCountExceeded(MAX_ROUTE_MESSAGES));
 }

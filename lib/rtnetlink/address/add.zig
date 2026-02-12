@@ -34,18 +34,30 @@ fn applyOptions(self: *AddrAdd) !void {
 fn computeBroadcast(addr: [4]u8, prefix_len: u8) [4]u8 {
     if (prefix_len >= 32) return addr;
 
-    const addr_be = std.mem.readInt(u32, &addr, .big);
+    const addr_u32 = ipv4ToU32(addr);
     const netmask: u32 = if (prefix_len == 0)
         0
     else blk: {
         const host_bits: u5 = @intCast(32 - prefix_len);
         break :blk @as(u32, 0xffff_ffff) << host_bits;
     };
-    const broadcast = addr_be | ~netmask;
+    return u32ToIpv4(addr_u32 | ~netmask);
+}
 
-    var out: [4]u8 = undefined;
-    std.mem.writeInt(u32, &out, broadcast, .big);
-    return out;
+fn ipv4ToU32(addr: [4]u8) u32 {
+    return (@as(u32, addr[0]) << 24) |
+        (@as(u32, addr[1]) << 16) |
+        (@as(u32, addr[2]) << 8) |
+        @as(u32, addr[3]);
+}
+
+fn u32ToIpv4(v: u32) [4]u8 {
+    return .{
+        @intCast((v >> 24) & 0xff),
+        @intCast((v >> 16) & 0xff),
+        @intCast((v >> 8) & 0xff),
+        @intCast(v & 0xff),
+    };
 }
 
 pub fn exec(self: *AddrAdd) !void {
@@ -68,4 +80,14 @@ test "computeBroadcast computes /24 broadcast" {
 
 test "computeBroadcast computes /0 broadcast" {
     try std.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, computeBroadcast(.{ 10, 20, 30, 40 }, 0));
+}
+
+test "computeBroadcast computes /25 boundary correctly" {
+    try std.testing.expectEqual([4]u8{ 10, 8, 4, 127 }, computeBroadcast(.{ 10, 8, 4, 5 }, 25));
+    try std.testing.expectEqual([4]u8{ 10, 8, 4, 255 }, computeBroadcast(.{ 10, 8, 4, 200 }, 25));
+}
+
+test "ipv4 u32 conversion roundtrip" {
+    const addr: [4]u8 = .{ 172, 16, 9, 33 };
+    try std.testing.expectEqual(addr, u32ToIpv4(ipv4ToU32(addr)));
 }

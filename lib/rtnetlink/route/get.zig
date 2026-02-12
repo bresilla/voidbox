@@ -46,7 +46,12 @@ fn recv(self: *Get) ![]RouteMessage {
     var packet_count: usize = 0;
 
     var response = std.ArrayList(RouteMessage).empty;
-    errdefer response.deinit(self.allocator);
+    errdefer {
+        for (response.items) |*msg| {
+            msg.deinit();
+        }
+        response.deinit(self.allocator);
+    }
     outer: while (n != 0) {
         if (routePacketCountExceeded(packet_count)) return error.TooManyRoutePackets;
         var d: usize = 0;

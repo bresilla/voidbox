@@ -1049,6 +1049,35 @@ test "integration smoke propagates child exit code" {
     try std.testing.expectEqual(@as(u8, 42), outcome.exit_code);
 }
 
+test "integration stress sequential netless launches" {
+    if (!integrationTestsEnabled()) return error.SkipZigTest;
+
+    const iterations: usize = 16;
+    var i: usize = 0;
+    while (i < iterations) : (i += 1) {
+        const cfg: JailConfig = .{
+            .name = "itest-stress-netless",
+            .rootfs_path = "/",
+            .cmd = &.{ "/bin/sh", "-c", "exit 0" },
+            .isolation = .{
+                .user = false,
+                .net = false,
+                .mount = false,
+                .pid = false,
+                .uts = false,
+                .ipc = false,
+                .cgroup = false,
+            },
+        };
+
+        const outcome = launch(cfg, std.testing.allocator) catch |err| switch (err) {
+            error.SpawnFailed => return error.SkipZigTest,
+            else => return err,
+        };
+        try std.testing.expectEqual(@as(u8, 0), outcome.exit_code);
+    }
+}
+
 fn integrationTestsEnabled() bool {
     const value = std.process.getEnvVarOwned(std.heap.page_allocator, "VOIDBOX_RUN_INTEGRATION") catch return false;
     defer std.heap.page_allocator.free(value);

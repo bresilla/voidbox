@@ -732,7 +732,7 @@ fn expandArgsFromFd(allocator: std.mem.Allocator, input: []const []const u8, dep
     return out.toOwnedSlice(allocator);
 }
 
-fn readArgVectorFromFd(allocator: std.mem.Allocator, fd: i32, owned_strings: ?*std.ArrayList([]u8)) ![]const []const u8 {
+fn readArgVectorFromFd(allocator: std.mem.Allocator, fd: i32, owned_strings: *std.ArrayList([]u8)) ![]const []const u8 {
     var file = std.fs.File{ .handle = fd };
     const data = try file.readToEndAlloc(allocator, 1 << 20);
     defer allocator.free(data);
@@ -746,15 +746,31 @@ fn readArgVectorFromFd(allocator: std.mem.Allocator, fd: i32, owned_strings: ?*s
         if (data[idx] != 0) continue;
         if (idx > start) {
             const dup = try allocator.dupe(u8, data[start..idx]);
-            if (owned_strings) |owned| try owned.append(allocator, dup);
+            var ownership_transferred = false;
+            errdefer if (!ownership_transferred) allocator.free(dup);
             try out.append(allocator, dup);
+            errdefer {
+                if (!ownership_transferred) {
+                    _ = out.pop();
+                }
+            }
+            try owned_strings.append(allocator, dup);
+            ownership_transferred = true;
         }
         start = idx + 1;
     }
     if (start < data.len) {
         const dup = try allocator.dupe(u8, data[start..]);
-        if (owned_strings) |owned| try owned.append(allocator, dup);
+        var ownership_transferred = false;
+        errdefer if (!ownership_transferred) allocator.free(dup);
         try out.append(allocator, dup);
+        errdefer {
+            if (!ownership_transferred) {
+                _ = out.pop();
+            }
+        }
+        try owned_strings.append(allocator, dup);
+        ownership_transferred = true;
     }
 
     return out.toOwnedSlice(allocator);
@@ -762,7 +778,10 @@ fn readArgVectorFromFd(allocator: std.mem.Allocator, fd: i32, owned_strings: ?*s
 
 fn allocOwnedPrint(allocator: std.mem.Allocator, owned_strings: *std.ArrayList([]u8), comptime fmt: []const u8, args: anytype) ![]u8 {
     const s = try std.fmt.allocPrint(allocator, fmt, args);
+    var ownership_transferred = false;
+    errdefer if (!ownership_transferred) allocator.free(s);
     try owned_strings.append(allocator, s);
+    ownership_transferred = true;
     return s;
 }
 

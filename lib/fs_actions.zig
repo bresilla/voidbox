@@ -340,11 +340,9 @@ fn cleanupTempDirs(paths: []const []const u8) void {
 
 pub fn cleanupInstanceArtifacts(rootfs: []const u8, instance_id: []const u8) void {
     const data_path = rootedPath(std.heap.page_allocator, rootfs, "/tmp/.voidbox-data", instance_id) catch return;
-    defer std.heap.page_allocator.free(data_path);
     cleanupTree(data_path);
 
     const overlay_path = rootedPath(std.heap.page_allocator, rootfs, "/tmp/.voidbox-overlay", instance_id) catch return;
-    defer std.heap.page_allocator.free(overlay_path);
     cleanupTree(overlay_path);
 }
 

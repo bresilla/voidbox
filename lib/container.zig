@@ -230,10 +230,13 @@ export fn childFn(a: usize) u8 {
     _ = linux.close(arg.setup_pipe[0]);
     // block until parent sets up needed resources
     {
-        var buff = [_]u8{1};
-        _ = std.posix.read(arg.pipe[0], &buff) catch {
+        var buff = [_]u8{0};
+        const n = std.posix.read(arg.pipe[0], &buff) catch {
             childExit(127);
         };
+        if (n != 1 or buff[0] != 0) {
+            childExit(127);
+        }
     }
 
     if (arg.container.namespace_fds.pid) |pidns_fd| {

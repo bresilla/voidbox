@@ -215,6 +215,7 @@ fn waitForFd(fd: i32) !void {
     var buf: [1]u8 = undefined;
     const n = try readOneByte(fd, &buf);
     if (n != 1) return error.SyncFdClosed;
+    if (buf[0] != 1) return error.SyncFdProtocolViolation;
 }
 
 fn readOneByte(fd: i32, out: *[1]u8) !usize {
@@ -411,4 +412,14 @@ test "waitForFd errors when synchronization writer is closed" {
     std.posix.close(pipefds[1]);
 
     try std.testing.expectError(error.SyncFdClosed, waitForFd(pipefds[0]));
+}
+
+test "waitForFd rejects unexpected synchronization byte" {
+    const pipefds = try std.posix.pipe();
+    defer std.posix.close(pipefds[0]);
+    defer std.posix.close(pipefds[1]);
+
+    const zero = [_]u8{0};
+    _ = try std.posix.write(pipefds[1], &zero);
+    try std.testing.expectError(error.SyncFdProtocolViolation, waitForFd(pipefds[0]));
 }

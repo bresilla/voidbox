@@ -1013,3 +1013,12 @@ test "parseBwrapArgs rejects dangling size modifier" {
         "--",     "/bin/true",
     }));
 }
+
+test "parseBwrapArgs cleans owned parser strings on error path" {
+    const allocator = std.testing.allocator;
+    try std.testing.expectError(error.MissingOptionValue, parseBwrapArgs(allocator, &.{
+        "--bind-fd",     "9",     "/mnt/a",
+        "--overlay-src", "/base", "--overlay",
+        "/upper",        "/work",
+    }));
+}

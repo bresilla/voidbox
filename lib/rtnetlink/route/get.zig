@@ -107,12 +107,21 @@ fn parseMessage(self: *Get, buff: []u8) !?RouteMessage {
         if (attr.len < @sizeOf(Attr)) return error.InvalidResponse;
         if (start + attr.len > len) return error.InvalidResponse;
         const payload_len = attr.len - @sizeOf(Attr);
-        // TODO: parse more attrs
         switch (attr.type) {
+            .Dst => {
+                if (msg.msg.hdr.family != linux.AF.INET) return error.UnsupportedAddressFamily;
+                if (payload_len != 4) return error.InvalidResponse;
+                try msg.addAttr(.{ .destination = frame[start + @sizeOf(Attr) .. start + @sizeOf(Attr) + 4][0..4].* });
+            },
             .Gateway => {
                 if (msg.msg.hdr.family != linux.AF.INET) return error.UnsupportedAddressFamily;
                 if (payload_len != 4) return error.InvalidResponse;
                 try msg.addAttr(.{ .gateway = frame[start + @sizeOf(Attr) .. start + @sizeOf(Attr) + 4][0..4].* });
+            },
+            .Prefsrc => {
+                if (msg.msg.hdr.family != linux.AF.INET) return error.UnsupportedAddressFamily;
+                if (payload_len != 4) return error.InvalidResponse;
+                try msg.addAttr(.{ .preferred_source = frame[start + @sizeOf(Attr) .. start + @sizeOf(Attr) + 4][0..4].* });
             },
             .Oif => {
                 if (payload_len != @sizeOf(u32)) return error.InvalidResponse;
@@ -337,6 +346,57 @@ test "parseMessage treats successful ERROR ack as terminator" {
     @memcpy(buff[@sizeOf(linux.nlmsghdr) .. @sizeOf(linux.nlmsghdr) + @sizeOf(i32)], std.mem.asBytes(&err_code));
 
     try std.testing.expect((try get.parseMessage(&buff)) == null);
+}
+
+test "parseMessage parses destination and preferred source attrs" {
+    var get = Get{ .msg = undefined, .nl = undefined, .allocator = std.testing.allocator };
+    const attr_size = @sizeOf(Attr) + 4;
+    const total_len = @sizeOf(linux.nlmsghdr) + @sizeOf(RouteMessage.RouteHeader) + attr_size + attr_size;
+    var buff: [total_len]u8 = [_]u8{0} ** total_len;
+
+    const hdr = linux.nlmsghdr{
+        .len = @intCast(total_len),
+        .type = .RTM_NEWROUTE,
+        .flags = 0,
+        .seq = 0,
+        .pid = 0,
+    };
+    @memcpy(buff[0..@sizeOf(linux.nlmsghdr)], std.mem.asBytes(&hdr));
+
+    const route_hdr = RouteMessage.RouteHeader{ .family = linux.AF.INET };
+    const route_off = @sizeOf(linux.nlmsghdr);
+    @memcpy(buff[route_off .. route_off + @sizeOf(RouteMessage.RouteHeader)], std.mem.asBytes(&route_hdr));
+
+    const dst_attr = Attr{ .len = @intCast(attr_size), .type = .Dst };
+    const dst_off = route_off + @sizeOf(RouteMessage.RouteHeader);
+    @memcpy(buff[dst_off .. dst_off + @sizeOf(Attr)], std.mem.asBytes(&dst_attr));
+    buff[dst_off + @sizeOf(Attr) + 0] = 10;
+    buff[dst_off + @sizeOf(Attr) + 1] = 0;
+    buff[dst_off + @sizeOf(Attr) + 2] = 0;
+    buff[dst_off + @sizeOf(Attr) + 3] = 0;
+
+    const src_attr = Attr{ .len = @intCast(attr_size), .type = .Prefsrc };
+    const src_off = dst_off + attr_size;
+    @memcpy(buff[src_off .. src_off + @sizeOf(Attr)], std.mem.asBytes(&src_attr));
+    buff[src_off + @sizeOf(Attr) + 0] = 10;
+    buff[src_off + @sizeOf(Attr) + 1] = 0;
+    buff[src_off + @sizeOf(Attr) + 2] = 0;
+    buff[src_off + @sizeOf(Attr) + 3] = 2;
+
+    var parsed = (try get.parseMessage(&buff)).?;
+    defer parsed.deinit();
+
+    var saw_dst = false;
+    var saw_prefsrc = false;
+    for (parsed.msg.attrs.items) |route_attr| {
+        switch (route_attr) {
+            .destination => saw_dst = true,
+            .preferred_source => saw_prefsrc = true,
+            else => {},
+        }
+    }
+    try std.testing.expect(saw_dst);
+    try std.testing.expect(saw_prefsrc);
 }
 
 test "routeCountExceeded enforces hard cap" {

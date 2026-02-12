@@ -43,12 +43,16 @@ pub const AttrType = enum(u16) {
 };
 // TODO: support IPv6
 pub const Attr = union(enum) {
+    destination: [4]u8,
     gateway: [4]u8,
+    preferred_source: [4]u8,
     output_if: u32,
 
     fn getAttr(self: Attr) RtAttr {
         var attr: RtAttr = switch (self) {
+            .destination => |val| .{ .len = val.len, .type = .Dst },
             .gateway => |val| .{ .len = val.len, .type = .Gateway },
+            .preferred_source => |val| .{ .len = val.len, .type = .Prefsrc },
             .output_if => .{ .len = 4, .type = .Oif },
         };
 
@@ -58,7 +62,9 @@ pub const Attr = union(enum) {
 
     pub fn size(self: Attr) usize {
         const len = switch (self) {
+            .destination => |val| val.len,
             .gateway => |val| val.len,
+            .preferred_source => |val| val.len,
             .output_if => 4,
         };
         return nalign(len + @sizeOf(RtAttr));
@@ -73,7 +79,15 @@ pub const Attr = union(enum) {
 
     inline fn encodeVal(self: Attr, buff: []u8) !usize {
         return switch (self) {
+            .destination => |val| {
+                @memcpy(buff[0..val.len], &val);
+                return val.len;
+            },
             .gateway => |val| {
+                @memcpy(buff[0..val.len], &val);
+                return val.len;
+            },
+            .preferred_source => |val| {
                 @memcpy(buff[0..val.len], &val);
                 return val.len;
             },
@@ -84,3 +98,13 @@ pub const Attr = union(enum) {
         };
     }
 };
+
+test "route attr ipv4 fields have expected encoded size" {
+    const destination_attr = Attr{ .destination = .{ 10, 0, 0, 0 } };
+    const gateway_attr = Attr{ .gateway = .{ 10, 0, 0, 1 } };
+    const preferred_source_attr = Attr{ .preferred_source = .{ 10, 0, 0, 2 } };
+
+    try std.testing.expectEqual(@as(usize, 8), destination_attr.size());
+    try std.testing.expectEqual(@as(usize, 8), gateway_attr.size());
+    try std.testing.expectEqual(@as(usize, 8), preferred_source_attr.size());
+}

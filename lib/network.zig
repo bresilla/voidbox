@@ -101,6 +101,7 @@ fn getDefaultGatewayIfName(self: *Net) ![]const u8 {
             switch (attr) {
                 .gateway => msg_has_gateway = true,
                 .output_if => |val| msg_if_index = val,
+                else => {},
             }
         }
         if (msg_has_gateway and msg_if_index != null) {

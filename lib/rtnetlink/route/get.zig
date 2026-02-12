@@ -69,7 +69,7 @@ fn parseMessage(self: *Get, buff: []u8) !?RouteMessage {
     if (header.type == .ERROR) {
         const err_code = try NetLink.parseNetlinkErrorCode(frame);
         try NetLink.handle_ack_code(err_code);
-        return error.InvalidResponse;
+        return null;
     } else if (header.type == .DONE) {
         return null;
     } else if (header.type != .RTM_NEWROUTE) {
@@ -297,6 +297,25 @@ test "parseMessage rejects unexpected netlink message type" {
     @memcpy(buff[route_off .. route_off + @sizeOf(RouteMessage.RouteHeader)], std.mem.asBytes(&route_hdr));
 
     try std.testing.expectError(error.InvalidResponse, get.parseMessage(&buff));
+}
+
+test "parseMessage treats successful ERROR ack as terminator" {
+    var get = Get{ .msg = undefined, .nl = undefined, .allocator = std.testing.allocator };
+    const total_len = @sizeOf(linux.nlmsghdr) + @sizeOf(i32);
+    var buff: [total_len]u8 = [_]u8{0} ** total_len;
+
+    const hdr = linux.nlmsghdr{
+        .len = @intCast(total_len),
+        .type = .ERROR,
+        .flags = 0,
+        .seq = 0,
+        .pid = 0,
+    };
+    const err_code: i32 = 0;
+    @memcpy(buff[0..@sizeOf(linux.nlmsghdr)], std.mem.asBytes(&hdr));
+    @memcpy(buff[@sizeOf(linux.nlmsghdr) .. @sizeOf(linux.nlmsghdr) + @sizeOf(i32)], std.mem.asBytes(&err_code));
+
+    try std.testing.expect((try get.parseMessage(&buff)) == null);
 }
 
 test "routeCountExceeded enforces hard cap" {

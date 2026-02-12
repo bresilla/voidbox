@@ -6,6 +6,7 @@ const nalign = @import("../utils.zig").nalign;
 const linux = std.os.linux;
 const MAX_LINK_FRAMES = 2048;
 const MAX_LINK_ATTRS = 1024;
+const MAX_LINK_PACKETS = 128;
 
 const LinkGet = @This();
 pub const Options = struct {
@@ -54,9 +55,11 @@ fn recv(self: *LinkGet) !LinkMessage {
     var buff: [4096]u8 = undefined;
     var parsed: ?LinkMessage = null;
     var frame_count: usize = 0;
+    var packet_count: usize = 0;
     errdefer if (parsed) |*msg| msg.deinit();
 
     while (true) {
+        if (linkPacketCountExceeded(packet_count)) return error.TooManyLinkPackets;
         const n = try self.nl.recv(&buff);
         if (n < @sizeOf(linux.nlmsghdr)) return error.InvalidResponse;
 
@@ -97,6 +100,8 @@ fn recv(self: *LinkGet) !LinkMessage {
             start += frame_len;
         }
 
+        packet_count += 1;
+
         if (parsed) |msg| return msg;
     }
 }
@@ -111,6 +116,10 @@ fn linkFrameCountExceeded(current_count: usize) bool {
 
 fn linkAttrCountExceeded(current_count: usize) bool {
     return current_count >= MAX_LINK_ATTRS;
+}
+
+fn linkPacketCountExceeded(current_count: usize) bool {
+    return current_count >= MAX_LINK_PACKETS;
 }
 
 fn parseLinkMessage(allocator: std.mem.Allocator, frame: []const u8, header: linux.nlmsghdr) !LinkMessage {
@@ -348,4 +357,9 @@ test "linkFrameCountExceeded enforces frame cap" {
 test "linkAttrCountExceeded enforces attr cap" {
     try std.testing.expect(!linkAttrCountExceeded(MAX_LINK_ATTRS - 1));
     try std.testing.expect(linkAttrCountExceeded(MAX_LINK_ATTRS));
+}
+
+test "linkPacketCountExceeded enforces packet cap" {
+    try std.testing.expect(!linkPacketCountExceeded(MAX_LINK_PACKETS - 1));
+    try std.testing.expect(linkPacketCountExceeded(MAX_LINK_PACKETS));
 }

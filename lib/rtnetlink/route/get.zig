@@ -7,6 +7,7 @@ const Attr = @import("attrs.zig").RtAttr;
 const nalign = @import("../utils.zig").nalign;
 const MAX_ROUTE_MESSAGES = 4096;
 const MAX_ROUTE_ATTRS = 1024;
+const MAX_ROUTE_PACKETS = 256;
 
 const Get = @This();
 
@@ -42,10 +43,12 @@ fn recv(self: *Get) ![]RouteMessage {
     var buff: [4096]u8 = undefined;
 
     var n = try self.nl.recv(&buff);
+    var packet_count: usize = 0;
 
     var response = std.ArrayList(RouteMessage).empty;
     errdefer response.deinit(self.allocator);
     outer: while (n != 0) {
+        if (routePacketCountExceeded(packet_count)) return error.TooManyRoutePackets;
         var d: usize = 0;
         while (d < n) {
             const msg = (try self.parseMessage(buff[d..n])) orelse break :outer;
@@ -56,6 +59,7 @@ fn recv(self: *Get) ![]RouteMessage {
             if (d + frame_len > n) return error.InvalidResponse;
             d += frame_len;
         }
+        packet_count += 1;
         n = try self.nl.recv(&buff);
     }
     return response.toOwnedSlice(self.allocator);
@@ -135,6 +139,10 @@ fn routeCountExceeded(current_count: usize) bool {
 
 fn routeAttrCountExceeded(current_count: usize) bool {
     return current_count >= MAX_ROUTE_ATTRS;
+}
+
+fn routePacketCountExceeded(current_count: usize) bool {
+    return current_count >= MAX_ROUTE_PACKETS;
 }
 
 test "parseMessage returns null for DONE frame" {
@@ -334,4 +342,9 @@ test "routeCountExceeded enforces hard cap" {
 test "routeAttrCountExceeded enforces attr cap" {
     try std.testing.expect(!routeAttrCountExceeded(MAX_ROUTE_ATTRS - 1));
     try std.testing.expect(routeAttrCountExceeded(MAX_ROUTE_ATTRS));
+}
+
+test "routePacketCountExceeded enforces packet cap" {
+    try std.testing.expect(!routePacketCountExceeded(MAX_ROUTE_PACKETS - 1));
+    try std.testing.expect(routePacketCountExceeded(MAX_ROUTE_PACKETS));
 }

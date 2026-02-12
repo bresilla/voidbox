@@ -1164,6 +1164,38 @@ test "integration spawn/wait session lifecycle enforces single wait" {
     try std.testing.expectError(error.SessionAlreadyWaited, wait(&session));
 }
 
+test "integration stress sequential session spawn-wait cycles" {
+    if (!integrationTestsEnabled()) return error.SkipZigTest;
+
+    const iterations: usize = 12;
+    var i: usize = 0;
+    while (i < iterations) : (i += 1) {
+        const cfg: JailConfig = .{
+            .name = "itest-session-stress",
+            .rootfs_path = "/",
+            .cmd = &.{ "/bin/sh", "-c", "exit 0" },
+            .isolation = .{
+                .user = false,
+                .net = false,
+                .mount = false,
+                .pid = false,
+                .uts = false,
+                .ipc = false,
+                .cgroup = false,
+            },
+        };
+
+        var session = spawn(cfg, std.testing.allocator) catch |err| switch (err) {
+            error.SpawnFailed => return error.SkipZigTest,
+            else => return err,
+        };
+        defer session.deinit();
+
+        const outcome = try wait(&session);
+        try std.testing.expectEqual(@as(u8, 0), outcome.exit_code);
+    }
+}
+
 fn integrationTestsEnabled() bool {
     const value = std.process.getEnvVarOwned(std.heap.page_allocator, "VOIDBOX_RUN_INTEGRATION") catch return false;
     defer std.heap.page_allocator.free(value);

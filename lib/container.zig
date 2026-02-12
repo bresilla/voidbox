@@ -126,6 +126,9 @@ pub fn spawn(self: *Container) !linux.pid_t {
     defer self.allocator.free(stack);
     var ctid: i32 = 0;
     var ptid: i32 = 0;
+    var child_pid: ?linux.pid_t = null;
+    errdefer if (child_pid) |pid| killAndReapChild(pid);
+
     const clone_flags = namespace.computeCloneFlags(self.isolation);
     const clone_res = linux.clone(childFn, @intFromPtr(&stack[0]) + stack.len, clone_flags, @intFromPtr(&childp_args), &ptid, 0, &ctid);
     try checkErr(clone_res, error.CloneFailed);
@@ -133,6 +136,7 @@ pub fn spawn(self: *Container) !linux.pid_t {
     const pid_signed: isize = @bitCast(clone_res);
     if (pid_signed <= 0) return error.CloneFailed;
     const pid: linux.pid_t = @intCast(pid_signed);
+    child_pid = pid;
     _ = linux.close(childp_args.pipe[0]);
     parent_read_open = false;
     _ = linux.close(childp_args.setup_pipe[1]);
@@ -178,7 +182,13 @@ pub fn spawn(self: *Container) !linux.pid_t {
     parent_setup_read_open = false;
     if (ready_n != 1 or ready[0] != 1) return error.SpawnFailed;
 
+    child_pid = null;
     return @intCast(pid);
+}
+
+fn killAndReapChild(pid: linux.pid_t) void {
+    std.posix.kill(pid, std.posix.SIG.KILL) catch {};
+    _ = std.posix.waitpid(pid, 0);
 }
 
 pub fn wait(self: *Container, pid: linux.pid_t) !u8 {
@@ -441,4 +451,15 @@ test "waitForFd rejects unexpected synchronization byte" {
     const zero = [_]u8{0};
     _ = try std.posix.write(pipefds[1], &zero);
     try std.testing.expectError(error.SyncFdProtocolViolation, waitForFd(pipefds[0]));
+}
+
+test "killAndReapChild terminates child process" {
+    const pid = try std.posix.fork();
+    if (pid == 0) {
+        _ = linux.syscall0(.pause);
+        childExit(0);
+    }
+
+    killAndReapChild(pid);
+    try std.testing.expectError(error.ProcessNotFound, std.posix.kill(pid, 0));
 }

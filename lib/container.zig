@@ -152,12 +152,13 @@ pub fn spawn(self: *Container) !linux.pid_t {
 
     // signal done by writing to pipe
     const buff = [_]u8{0};
-    _ = try std.posix.write(childp_args.pipe[1], &buff);
+    const signal_n = try writeOneByte(childp_args.pipe[1], &buff);
+    if (signal_n != 1) return error.SpawnFailed;
     _ = linux.close(childp_args.pipe[1]);
     parent_write_open = false;
 
     var ready: [1]u8 = undefined;
-    const ready_n = std.posix.read(childp_args.setup_pipe[0], &ready) catch {
+    const ready_n = readOneByte(childp_args.setup_pipe[0], &ready) catch {
         _ = linux.close(childp_args.setup_pipe[0]);
         parent_setup_read_open = false;
         return error.SpawnFailed;
@@ -233,7 +234,7 @@ export fn childFn(a: usize) u8 {
     // block until parent sets up needed resources
     {
         var buff = [_]u8{0};
-        const n = std.posix.read(arg.pipe[0], &buff) catch {
+        const n = readOneByte(arg.pipe[0], &buff) catch {
             childExit(127);
         };
         if (n != 1 or buff[0] != 0) {

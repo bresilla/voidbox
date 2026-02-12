@@ -143,16 +143,23 @@ fn if_enable_snat(self: *Net, if_name: []const u8) !void {
     check_rule.stdout_behavior = .Ignore;
     check_rule.stderr_behavior = .Ignore;
     const check_rule_res = try check_rule.spawnAndWait();
-    if (check_rule_res.Exited == 0) return;
+    if (termExitedZero(check_rule_res)) return;
 
     // add rule if it doesn't exist
     var ch = std.process.Child.init(&.{ "iptables", "-t", "nat", "-A", "POSTROUTING", "-o", if_name, "-j", "MASQUERADE" }, self.allocator);
     ch.stdout_behavior = .Ignore;
     ch.stderr_behavior = .Ignore;
     const term = try ch.spawnAndWait();
-    if (term.Exited != 0) {
+    if (!termExitedZero(term)) {
         return error.CmdFailed;
     }
+}
+
+fn termExitedZero(term: std.process.Child.Term) bool {
+    return switch (term) {
+        .Exited => |code| code == 0,
+        else => false,
+    };
 }
 
 pub fn createVethPair(self: *Net) !void {
@@ -286,4 +293,10 @@ test "natNeedsReconfigure returns false for same ifname" {
 
 test "natNeedsReconfigure returns true for changed ifname" {
     try std.testing.expect(natNeedsReconfigure(true, "eth0", "wlan0"));
+}
+
+test "termExitedZero only treats exited(0) as success" {
+    try std.testing.expect(termExitedZero(.{ .Exited = 0 }));
+    try std.testing.expect(!termExitedZero(.{ .Exited = 1 }));
+    try std.testing.expect(!termExitedZero(.{ .Signal = 9 }));
 }
